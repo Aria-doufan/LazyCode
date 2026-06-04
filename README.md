@@ -27,74 +27,19 @@ LazyCode 不会在一开始把所有工具、技能和长说明一次性塞进�
 - 子 Agent 可按任务隔离上下文，避免主会话膨胀
 - 内置 Agent、Skill、Tool 可以持续扩展
 
-```mermaid
-flowchart TD
-    U[User Request] --> A[Core Agent Runtime]
-
-    A --> C{Need extra capability?}
-    C -->|No| R[Respond directly]
-    C -->|Command| CMD[Command Registry]
-    C -->|Skill| SL[Skill Loader]
-    C -->|Tool| TR[Tool Registry]
-    C -->|Subtask| SA[Sub Agent / Team]
-
-    SL --> SD[Load selected SKILL.md]
-    SD --> A
-
-    TR --> TF[Tool Filter]
-    TF --> PC[Permission Check]
-    PC --> TE[Tool Execution]
-    TE --> A
-
-    SA --> SC[Isolated Context]
-    SC --> A
-```
+![Agent / Skill / Tool Runtime Flow](images/agent-skill-tool-runtime-flow.png)
 
 ### 2. 多层权限机制
 
 LazyCode 的权限系统不是简单地“允许 / 拒绝工具”，而是把权限判断拆成多层：工具类型、路径、危险命令、用户规则、沙箱模式和交互确认共同决定一次调用是否可以执行。
 
-```mermaid
-flowchart LR
-    T[Tool Call Request] --> M[Permission Mode]
-    M --> R[User / Project Rules]
-    R --> D[Dangerous Operation Detector]
-    D --> P[Path & Scope Check]
-    P --> S[Sandbox Policy]
-    S --> Q{Need confirmation?}
-
-    Q -->|Allow| E[Execute Tool]
-    Q -->|Ask user| UI[Permission Dialog]
-    Q -->|Deny| X[Block Request]
-
-    UI -->|Approved| E
-    UI -->|Rejected| X
-```
+![LazyCode Permission System Flow](images/permission-system-flow.png)
 
 ### 3. 面向真实 Coding Agent 的运行时架构
 
 项目将 Agent 的能力拆成多个清晰模块：模型客户端、会话、工具、权限、技能、Hook、MCP、上下文管理和多 Agent 协作。每个模块都可以独立测试，也方便继续扩展。
 
-```mermaid
-flowchart TB
-    APP[Terminal App] --> AG[Agent]
-    AG --> CLIENT[LLM Client]
-    AG --> CONV[Conversation]
-    AG --> CTX[Context Manager]
-    AG --> TOOLS[Tools]
-    AG --> SKILLS[Skills]
-    AG --> PERM[Permissions]
-    AG --> HOOKS[Hooks]
-    AG --> MCP[MCP]
-    AG --> TEAMS[Teams / Subagents]
-
-    TOOLS --> PERM
-    SKILLS --> TOOLS
-    MCP --> TOOLS
-    HOOKS --> AG
-    TEAMS --> AG
-    CTX --> CONV
-```
+![Agent Modular Architecture](images/agent-modular-architecture.png)
 
 ### 4. 可测试的 Agent 工程实践
 
