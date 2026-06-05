@@ -73,6 +73,9 @@ class MCPToolWrapper(Tool):
         self.name = f"mcp_{server_name}_{tool_def.name}"
         self.description = tool_def.description or tool_def.name
         self.category = "command"
+        self.is_mcp_tool = True
+        self.mcp_server_name = server_name
+        self.mcp_original_tool_name = tool_def.name
         self.is_concurrency_safe = False
         # MCP 工具可能触发外部服务或副作用，默认延迟加载，减少初始上下文和误调用。
         self.should_defer = True

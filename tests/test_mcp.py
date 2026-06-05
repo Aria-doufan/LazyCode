@@ -195,6 +195,9 @@ class TestMCPToolWrapper:
         assert wrapper.name == "mcp_github_search_issues"
         assert wrapper.category == "command"
         assert wrapper.description == "Search GitHub issues"
+        assert wrapper.is_mcp_tool is True
+        assert wrapper.mcp_server_name == "github"
+        assert wrapper.mcp_original_tool_name == "search_issues"
 
     def test_get_schema_uses_original_input_schema(self) -> None:
         from mcp import types as mcp_types

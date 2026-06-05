@@ -1626,7 +1626,8 @@ class LazyCodeApp(App):
                 srv_name = cfg.name if hasattr(cfg, 'name') else str(cfg)
                 tool_names = [
                     t.name for t in self.registry.list_tools()
-                    if t.name.startswith(f"mcp__{srv_name}__")
+                    if getattr(t, "is_mcp_tool", False)
+                    and getattr(t, "mcp_server_name", "") == srv_name
                 ]
                 section = f"## {srv_name}\n"
                 if tool_names:

@@ -73,9 +73,9 @@ COORDINATOR_MODE_ALLOWED_TOOLS: frozenset[str] = frozenset({
 })
 
 
-def _is_mcp_tool(name: str) -> bool:
+def _is_mcp_tool(tool: Any) -> bool:
     """判断MCP 工具是否成立。"""
-    return name.startswith("mcp__")
+    return bool(getattr(tool, "is_mcp_tool", False))
 
 
 def resolve_agent_tools(
@@ -87,8 +87,8 @@ def resolve_agent_tools(
     all_tools = {t.name: t for t in parent_registry.list_tools()}
 
     # Layer 0: MCP tools always pass through — separate before filtering
-    mcp_tools = {name: tool for name, tool in all_tools.items() if _is_mcp_tool(name)}
-    all_tools = {name: tool for name, tool in all_tools.items() if not _is_mcp_tool(name)}
+    mcp_tools = {name: tool for name, tool in all_tools.items() if _is_mcp_tool(tool)}
+    all_tools = {name: tool for name, tool in all_tools.items() if not _is_mcp_tool(tool)}
 
     for name in ALL_AGENT_DISALLOWED_TOOLS:
         all_tools.pop(name, None)

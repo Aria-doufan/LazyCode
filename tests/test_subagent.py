@@ -320,6 +320,22 @@ class TestToolFilter:
         for name in names:
             assert name in ASYNC_AGENT_ALLOWED_TOOLS
 
+    def test_mcp_tools_pass_through_background_filter(self):
+        reg = make_registry("ReadFile", "SomeOtherTool")
+        mcp_tool = DummyTool("mcp_github_search_issues")
+        mcp_tool.is_mcp_tool = True
+        mcp_tool.mcp_server_name = "github"
+        reg.register(mcp_tool)
+        definition = AgentDef(
+            agent_type="test", when_to_use="test", source="builtin"
+        )
+
+        filtered = resolve_agent_tools(reg, definition, is_background=True)
+        names = {t.name for t in filtered.list_tools()}
+
+        assert "mcp_github_search_issues" in names
+        assert "SomeOtherTool" not in names
+
     def test_combined_whitelist_and_blacklist(self):
         reg = make_registry("ReadFile", "EditFile", "WriteFile", "Bash", "Grep")
         definition = AgentDef(
