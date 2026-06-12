@@ -212,6 +212,16 @@ class CodeGraphStore:
                 ],
             )
 
+    def delete_resolved_call_edges(self) -> None:
+        with self._conn:
+            self._conn.execute(
+                """
+                DELETE FROM edges
+                WHERE kind = 'calls'
+                  AND metadata LIKE '%"generated_by": "resolve_references"%'
+                """
+            )
+
     def clear_unresolved_refs(self) -> None:
         with self._conn:
             self._conn.execute("DELETE FROM unresolved_refs")

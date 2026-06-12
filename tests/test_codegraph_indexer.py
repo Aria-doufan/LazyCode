@@ -107,3 +107,28 @@ def test_indexer_resolves_cross_file_function_calls(tmp_path: Path) -> None:
     callers = store.get_callers("helper")
 
     assert [(n.name, n.file_path) for n in callers] == [("run", "pkg/service.py")]
+
+
+def test_indexer_preserves_cross_file_callers_when_only_target_changes(tmp_path: Path) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    helpers = pkg / "helpers.py"
+    helpers.write_text("def helper():\n    pass\n", encoding="utf-8")
+    (pkg / "service.py").write_text(
+        "from pkg.helpers import helper\n\ndef run():\n    helper()\n",
+        encoding="utf-8",
+    )
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    indexer.index_all()
+    assert [(n.name, n.file_path) for n in store.get_callers("helper")] == [
+        ("run", "pkg/service.py")
+    ]
+
+    helpers.write_text("def helper():\n    return 42\n", encoding="utf-8")
+    indexer.index_all()
+
+    assert [(n.name, n.file_path) for n in store.get_callers("helper")] == [
+        ("run", "pkg/service.py")
+    ]
