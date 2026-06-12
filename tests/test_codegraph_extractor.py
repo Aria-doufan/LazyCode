@@ -132,3 +132,31 @@ def configure(path: str = "x", *items, enabled: bool = True, **opts) -> None:
     assert "enabled: bool = True" in node.signature
     assert "**opts" in node.signature
     assert node.signature.endswith("-> None")
+
+
+def test_extracts_direct_call_edges_inside_file() -> None:
+    source = """\
+def helper() -> None:
+    pass
+
+def run() -> None:
+    helper()
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    calls = {(e.source, e.target, e.kind) for e in result.edges if e.kind == "calls"}
+    assert ("pkg/service.py::run", "pkg/service.py::helper", "calls") in calls
+
+
+def test_records_unresolved_attribute_call() -> None:
+    source = """\
+def run(client):
+    client.send()
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    assert result.unresolved_refs[0].source == "pkg/service.py::run"
+    assert result.unresolved_refs[0].name == "client.send"
+    assert result.unresolved_refs[0].kind == "calls"

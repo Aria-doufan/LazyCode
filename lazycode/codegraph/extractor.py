@@ -36,7 +36,8 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         self.source = source
         self.result = result
         self.module_name = _module_name(file_path)
-        self.scope_stack: list[tuple[str, str, bool]] = []
+        self.scope_stack: list[tuple[str, str, bool, bool]] = []
+        self.local_callables: dict[str, str] = {}
         self._symbol_node_ids: set[str] = set()
         self._import_occurrence = 0
 
@@ -56,7 +57,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
                 signature=f"module {self.module_name}",
             )
         )
-        self.scope_stack.append((module_id, "", False))
+        self.scope_stack.append((module_id, "", False, False))
         self.visit(tree)
         self.scope_stack.pop()
 
@@ -81,7 +82,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             )
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        parent_id, parent_qualified, _ = self.scope_stack[-1]
+        parent_id, parent_qualified, _, _ = self.scope_stack[-1]
         qualified = self._qualify(parent_qualified, node.name)
         node_id = self._unique_symbol_node_id(f"{self.file_path}::{qualified}", node)
         self.result.nodes.append(
@@ -98,7 +99,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             )
         )
         self._add_contains_edge(parent_id, node_id, node)
-        self.scope_stack.append((node_id, qualified, True))
+        self.scope_stack.append((node_id, qualified, True, False))
         self.generic_visit(node)
         self.scope_stack.pop()
 
@@ -109,9 +110,10 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         self._add_function_node(node, is_async=True)
 
     def _add_function_node(self, node: ast.FunctionDef | ast.AsyncFunctionDef, *, is_async: bool) -> None:
-        parent_id, parent_qualified, parent_is_class = self.scope_stack[-1]
+        parent_id, parent_qualified, parent_is_class, _ = self.scope_stack[-1]
         qualified = self._qualify(parent_qualified, node.name)
         node_id = self._unique_symbol_node_id(f"{self.file_path}::{qualified}", node)
+        self.local_callables[node.name] = node_id
         self.result.nodes.append(
             NodeRecord(
                 id=node_id,
@@ -126,9 +128,38 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             )
         )
         self._add_contains_edge(parent_id, node_id, node)
-        self.scope_stack.append((node_id, qualified, False))
+        self.scope_stack.append((node_id, qualified, False, True))
         self.generic_visit(node)
         self.scope_stack.pop()
+
+    def visit_Call(self, node: ast.Call) -> None:
+        current_id, _, _, in_callable = self.scope_stack[-1]
+        if in_callable:
+            call_name = self._call_name(node.func)
+            target_id = self.local_callables.get(call_name)
+            if target_id is not None:
+                self.result.edges.append(
+                    EdgeRecord(
+                        source=current_id,
+                        target=target_id,
+                        kind="calls",
+                        line=getattr(node, "lineno", 0),
+                        col=getattr(node, "col_offset", 0),
+                        metadata={"name": call_name},
+                    )
+                )
+            elif call_name:
+                self.result.unresolved_refs.append(
+                    UnresolvedReference(
+                        source=current_id,
+                        name=call_name,
+                        kind="calls",
+                        line=getattr(node, "lineno", 0),
+                        col=getattr(node, "col_offset", 0),
+                        file_path=self.file_path,
+                    )
+                )
+        self.generic_visit(node)
 
     def _unique_symbol_node_id(self, base_id: str, node: ast.AST) -> str:
         if base_id not in self._symbol_node_ids:
@@ -140,7 +171,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         return duplicate_id
 
     def _add_import_node(self, name: str, start_line: int, end_line: int, col: int) -> None:
-        parent_id, _, _ = self.scope_stack[-1]
+        parent_id, _, _, _ = self.scope_stack[-1]
         qualified = f"{self.module_name}.{name}" if self.module_name else name
         self._import_occurrence += 1
         node_id = f"{self.file_path}::{qualified}@import:{start_line}:{col}:{self._import_occurrence}"
@@ -216,6 +247,15 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         if default is not None:
             text += f" = {ast.unparse(default)}"
         return text
+
+    def _call_name(self, node: ast.expr) -> str:
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute):
+            base_name = self._call_name(node.value)
+            if base_name:
+                return f"{base_name}.{node.attr}"
+        return ""
 
     def _qualify(self, parent_qualified: str, name: str) -> str:
         if not parent_qualified:
