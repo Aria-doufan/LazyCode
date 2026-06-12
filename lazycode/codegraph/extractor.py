@@ -14,6 +14,13 @@ class ExtractionResult:
     unresolved_refs: list[UnresolvedReference] = field(default_factory=list)
 
 
+@dataclass
+class _CallableScope:
+    symbols: dict[str, str]
+    bare_call_visible: bool
+    shadowed_names: set[str] = field(default_factory=set)
+
+
 def extract_python_graph(file_path: str, source: str) -> ExtractionResult:
     tree = ast.parse(source, filename=file_path)
     result = ExtractionResult()
@@ -37,7 +44,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         self.result = result
         self.module_name = _module_name(file_path)
         self.scope_stack: list[tuple[str, str, bool, bool]] = []
-        self.callable_scope_stack: list[tuple[dict[str, str], bool]] = []
+        self.callable_scope_stack: list[_CallableScope] = []
         self._precollected_node_ids: dict[int, str] = {}
         self._symbol_node_ids: set[str] = set()
         self._import_occurrence = 0
@@ -59,7 +66,9 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             )
         )
         self.scope_stack.append((module_id, "", False, False))
-        self.callable_scope_stack.append((self._collect_callable_symbols(tree.body, ""), True))
+        self.callable_scope_stack.append(
+            _CallableScope(self._collect_callable_symbols(tree.body, ""), True)
+        )
         self.visit(tree)
         self.callable_scope_stack.pop()
         self.scope_stack.pop()
@@ -103,7 +112,9 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         )
         self._add_contains_edge(parent_id, node_id, node)
         self.scope_stack.append((node_id, qualified, True, False))
-        self.callable_scope_stack.append((self._collect_callable_symbols(node.body, qualified), False))
+        self.callable_scope_stack.append(
+            _CallableScope(self._collect_callable_symbols(node.body, qualified), False)
+        )
         self.generic_visit(node)
         self.callable_scope_stack.pop()
         self.scope_stack.pop()
@@ -133,7 +144,13 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         )
         self._add_contains_edge(parent_id, node_id, node)
         self.scope_stack.append((node_id, qualified, False, True))
-        self.callable_scope_stack.append((self._collect_callable_symbols(node.body, qualified), True))
+        self.callable_scope_stack.append(
+            _CallableScope(
+                self._collect_callable_symbols(node.body, qualified),
+                True,
+                self._collect_local_shadowed_names(node),
+            )
+        )
         for statement in node.body:
             self.visit(statement)
         self.callable_scope_stack.pop()
@@ -184,13 +201,49 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             return precollected_id
         return self._unique_symbol_node_id(f"{self.file_path}::{qualified}", node)
 
+    def _collect_local_shadowed_names(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef
+    ) -> set[str]:
+        names = self._collect_argument_names(node.args)
+        for statement in node.body:
+            names.update(self._collect_statement_binding_names(statement))
+        return names
+
+    def _collect_argument_names(self, arguments: ast.arguments) -> set[str]:
+        names = {arg.arg for arg in arguments.posonlyargs}
+        names.update(arg.arg for arg in arguments.args)
+        names.update(arg.arg for arg in arguments.kwonlyargs)
+        if arguments.vararg is not None:
+            names.add(arguments.vararg.arg)
+        if arguments.kwarg is not None:
+            names.add(arguments.kwarg.arg)
+        return names
+
+    def _collect_statement_binding_names(self, statement: ast.stmt) -> set[str]:
+        if isinstance(statement, ast.Assign):
+            return self._collect_target_names(*statement.targets)
+        if isinstance(statement, ast.AnnAssign | ast.AugAssign):
+            return self._collect_target_names(statement.target)
+        return set()
+
+    def _collect_target_names(self, *targets: ast.expr) -> set[str]:
+        names: set[str] = set()
+        for target in targets:
+            if isinstance(target, ast.Name):
+                names.add(target.id)
+            elif isinstance(target, ast.Tuple | ast.List):
+                names.update(self._collect_target_names(*target.elts))
+        return names
+
     def _resolve_callable(self, call_name: str) -> str | None:
-        for symbols, bare_call_visible in reversed(self.callable_scope_stack):
-            if not bare_call_visible:
+        for scope in reversed(self.callable_scope_stack):
+            if not scope.bare_call_visible:
                 continue
-            target_id = symbols.get(call_name)
+            target_id = scope.symbols.get(call_name)
             if target_id is not None:
                 return target_id
+            if call_name in scope.shadowed_names:
+                return None
         return None
 
     def _unique_symbol_node_id(self, base_id: str, node: ast.AST) -> str:

@@ -225,6 +225,71 @@ class Service:
     assert ("pkg/service.py::Service.run", "helper", "calls") in unresolved
 
 
+def test_parameter_shadowing_prevents_outer_call_resolution() -> None:
+    source = """\
+def helper() -> None:
+    pass
+
+
+def run(helper) -> None:
+    helper()
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    calls = {(e.source, e.target, e.kind) for e in result.edges if e.kind == "calls"}
+    assert ("pkg/service.py::run", "pkg/service.py::helper", "calls") not in calls
+    unresolved = {(ref.source, ref.name, ref.kind) for ref in result.unresolved_refs}
+    assert ("pkg/service.py::run", "helper", "calls") in unresolved
+
+
+def test_assignment_shadowing_prevents_outer_call_resolution() -> None:
+    source = """\
+def helper() -> None:
+    pass
+
+
+def get_helper():
+    return helper
+
+
+def run() -> None:
+    helper = get_helper
+    helper()
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    calls = {(e.source, e.target, e.kind) for e in result.edges if e.kind == "calls"}
+    assert ("pkg/service.py::run", "pkg/service.py::helper", "calls") not in calls
+    unresolved = {(ref.source, ref.name, ref.kind) for ref in result.unresolved_refs}
+    assert ("pkg/service.py::run", "helper", "calls") in unresolved
+
+
+def test_nested_function_resolution_wins_over_local_shadow_blockers() -> None:
+    source = """\
+def helper() -> None:
+    pass
+
+
+def run() -> None:
+    def helper() -> None:
+        pass
+
+    helper()
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    calls = {(e.source, e.target, e.kind) for e in result.edges if e.kind == "calls"}
+    assert ("pkg/service.py::run", "pkg/service.py::run.helper", "calls") in calls
+    assert not [
+        ref
+        for ref in result.unresolved_refs
+        if ref.source == "pkg/service.py::run" and ref.name == "helper"
+    ]
+
+
 def test_records_unresolved_attribute_call() -> None:
     source = """\
 def run(client):
