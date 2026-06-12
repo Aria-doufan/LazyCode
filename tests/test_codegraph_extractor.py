@@ -438,6 +438,51 @@ def run() -> None:
     assert ("pkg/service.py::run", "helper", "calls") in unresolved
 
 
+def test_later_module_function_overrides_earlier_same_named_assignment_for_call_resolution() -> None:
+    source = """\
+helper = factory()
+
+
+def helper() -> None:
+    pass
+
+
+def run() -> None:
+    helper()
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    calls = {(e.source, e.target, e.kind) for e in result.edges if e.kind == "calls"}
+    assert ("pkg/service.py::run", "pkg/service.py::helper", "calls") in calls
+    assert not [
+        ref
+        for ref in result.unresolved_refs
+        if ref.source == "pkg/service.py::run" and ref.name == "helper"
+    ]
+
+
+def test_star_import_after_same_named_function_prevents_later_call_resolution() -> None:
+    source = """\
+def helper() -> None:
+    pass
+
+
+from other import *
+
+
+def run() -> None:
+    helper()
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    calls = {(e.source, e.target, e.kind) for e in result.edges if e.kind == "calls"}
+    assert ("pkg/service.py::run", "pkg/service.py::helper", "calls") not in calls
+    unresolved = {(ref.source, ref.name, ref.kind) for ref in result.unresolved_refs}
+    assert ("pkg/service.py::run", "helper", "calls") in unresolved
+
+
 def test_local_function_defined_inside_match_case_resolves_later_bare_call() -> None:
     source = """\
 def run(value) -> None:

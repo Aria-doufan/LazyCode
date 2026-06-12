@@ -66,14 +66,8 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             )
         )
         self.scope_stack.append((module_id, "", False, False))
-        module_symbols = self._collect_callable_symbols(tree.body, "")
-        self.callable_scope_stack.append(
-            _CallableScope(
-                module_symbols,
-                True,
-                self._collect_module_shadowed_names(tree.body),
-            )
-        )
+        module_symbols = self._collect_module_callable_symbols(tree.body)
+        self.callable_scope_stack.append(_CallableScope(module_symbols, True))
         self.visit(tree)
         self.callable_scope_stack.pop()
         self.scope_stack.pop()
@@ -196,6 +190,36 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             self._collect_callable_symbol_from_statement(statement, parent_qualified, symbols)
         return symbols
 
+    def _collect_module_callable_symbols(self, body: list[ast.stmt]) -> dict[str, str]:
+        final_bindings: dict[str, str | None] = {}
+        for statement in body:
+            self._collect_module_binding_from_statement(statement, final_bindings)
+        return {name: node_id for name, node_id in final_bindings.items() if node_id is not None}
+
+    def _collect_module_binding_from_statement(
+        self, statement: ast.AST, final_bindings: dict[str, str | None]
+    ) -> None:
+        if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
+            qualified = self._qualify("", statement.name)
+            node_id = self._unique_symbol_node_id(f"{self.file_path}::{qualified}", statement)
+            self._precollected_node_ids[id(statement)] = node_id
+            final_bindings[statement.name] = node_id
+            return
+        if isinstance(statement, ast.ClassDef):
+            final_bindings[statement.name] = None
+            return
+        if isinstance(statement, ast.ImportFrom) and any(alias.name == "*" for alias in statement.names):
+            for name in list(final_bindings):
+                final_bindings[name] = None
+            return
+
+        for name in self._collect_direct_statement_binding_names(statement):
+            final_bindings[name] = None
+
+        for child in ast.iter_child_nodes(statement):
+            if isinstance(child, ast.stmt | ast.ExceptHandler | ast.match_case):
+                self._collect_module_binding_from_statement(child, final_bindings)
+
     def _collect_callable_symbol_from_statement(
         self, statement: ast.AST, parent_qualified: str, symbols: dict[str, str]
     ) -> None:
@@ -242,6 +266,28 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             names.add(arguments.vararg.arg)
         if arguments.kwarg is not None:
             names.add(arguments.kwarg.arg)
+        return names
+
+    def _collect_direct_statement_binding_names(self, statement: ast.AST) -> set[str]:
+        names: set[str] = set()
+        if isinstance(statement, ast.Assign):
+            names.update(self._collect_target_names(*statement.targets))
+        elif isinstance(statement, ast.AnnAssign | ast.AugAssign):
+            names.update(self._collect_target_names(statement.target))
+        elif isinstance(statement, ast.Import):
+            names.update(alias.asname or alias.name.split(".", 1)[0] for alias in statement.names)
+        elif isinstance(statement, ast.ImportFrom):
+            names.update(alias.asname or alias.name for alias in statement.names if alias.name != "*")
+        elif isinstance(statement, ast.For | ast.AsyncFor):
+            names.update(self._collect_target_names(statement.target))
+        elif isinstance(statement, ast.With | ast.AsyncWith):
+            for item in statement.items:
+                if item.optional_vars is not None:
+                    names.update(self._collect_target_names(item.optional_vars))
+        elif isinstance(statement, ast.ExceptHandler) and statement.name is not None:
+            names.add(statement.name)
+        elif isinstance(statement, ast.match_case):
+            names.update(self._collect_pattern_binding_names(statement.pattern))
         return names
 
     def _collect_statement_binding_names(self, statement: ast.AST) -> set[str]:
