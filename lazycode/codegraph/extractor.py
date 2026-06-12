@@ -37,6 +37,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         self.result = result
         self.module_name = _module_name(file_path)
         self.scope_stack: list[tuple[str, str, bool]] = []
+        self._import_occurrence = 0
 
     def extract(self, tree: ast.Module) -> None:
         module_id = f"{self.file_path}::module"
@@ -61,12 +62,22 @@ class _PythonGraphVisitor(ast.NodeVisitor):
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
             name = alias.asname or alias.name.split(".", 1)[0]
-            self._add_import_node(name, node.lineno, getattr(node, "end_lineno", node.lineno))
+            self._add_import_node(
+                name,
+                getattr(alias, "lineno", node.lineno),
+                getattr(alias, "end_lineno", getattr(node, "end_lineno", node.lineno)),
+                getattr(alias, "col_offset", node.col_offset),
+            )
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         for alias in node.names:
             name = alias.asname or alias.name
-            self._add_import_node(name, node.lineno, getattr(node, "end_lineno", node.lineno))
+            self._add_import_node(
+                name,
+                getattr(alias, "lineno", node.lineno),
+                getattr(alias, "end_lineno", getattr(node, "end_lineno", node.lineno)),
+                getattr(alias, "col_offset", node.col_offset),
+            )
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         parent_id, parent_qualified, _ = self.scope_stack[-1]
@@ -118,10 +129,11 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         self.generic_visit(node)
         self.scope_stack.pop()
 
-    def _add_import_node(self, name: str, start_line: int, end_line: int) -> None:
+    def _add_import_node(self, name: str, start_line: int, end_line: int, col: int) -> None:
         parent_id, _, _ = self.scope_stack[-1]
         qualified = f"{self.module_name}.{name}" if self.module_name else name
-        node_id = f"{self.file_path}::{qualified}"
+        self._import_occurrence += 1
+        node_id = f"{self.file_path}::{qualified}@import:{start_line}:{col}:{self._import_occurrence}"
         self.result.nodes.append(
             NodeRecord(
                 id=node_id,
@@ -158,17 +170,42 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         )
 
     def _function_signature(self, node: ast.FunctionDef | ast.AsyncFunctionDef, *, is_async: bool) -> str:
-        args = ", ".join(self._format_arg(arg) for arg in [*node.args.posonlyargs, *node.args.args])
         prefix = "async def" if is_async else "def"
-        signature = f"{prefix} {node.name}({args})"
+        signature = f"{prefix} {node.name}({self._format_arguments(node.args)})"
         if node.returns is not None:
             signature += f" -> {ast.unparse(node.returns)}"
         return signature
 
-    def _format_arg(self, arg: ast.arg) -> str:
-        if arg.annotation is None:
-            return arg.arg
-        return f"{arg.arg}: {ast.unparse(arg.annotation)}"
+    def _format_arguments(self, arguments: ast.arguments) -> str:
+        parts: list[str] = []
+        positional = [*arguments.posonlyargs, *arguments.args]
+        defaults = [None] * (len(positional) - len(arguments.defaults)) + list(arguments.defaults)
+
+        for index, (arg, default) in enumerate(zip(positional, defaults)):
+            parts.append(self._format_arg(arg, default))
+            if index == len(arguments.posonlyargs) - 1:
+                parts.append("/")
+
+        if arguments.vararg is not None:
+            parts.append(f"*{self._format_arg(arguments.vararg)}")
+        elif arguments.kwonlyargs:
+            parts.append("*")
+
+        for arg, default in zip(arguments.kwonlyargs, arguments.kw_defaults):
+            parts.append(self._format_arg(arg, default))
+
+        if arguments.kwarg is not None:
+            parts.append(f"**{self._format_arg(arguments.kwarg)}")
+
+        return ", ".join(parts)
+
+    def _format_arg(self, arg: ast.arg, default: ast.expr | None = None) -> str:
+        text = arg.arg
+        if arg.annotation is not None:
+            text += f": {ast.unparse(arg.annotation)}"
+        if default is not None:
+            text += f" = {ast.unparse(default)}"
+        return text
 
     def _qualify(self, parent_qualified: str, name: str) -> str:
         if not parent_qualified:

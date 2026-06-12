@@ -42,3 +42,40 @@ async def fetch(url: str) -> bytes:
     assert node.signature == "async def fetch(url: str) -> bytes"
     assert node.start_line == 1
     assert node.end_line == 2
+
+
+def test_repeated_import_aliases_have_unique_node_ids() -> None:
+    source = """\
+import os as tools
+
+
+def outer() -> None:
+    import sys as tools
+
+    if True:
+        import json as tools
+"""
+
+    result = extract_python_graph("pkg/imports.py", source)
+
+    import_nodes = [node for node in result.nodes if node.kind == "import"]
+    assert len(import_nodes) == 3
+    assert len({node.id for node in import_nodes}) == len(import_nodes)
+    assert {node.qualified_name for node in import_nodes} == {"pkg.imports.tools"}
+
+
+def test_function_signature_includes_defaults_varargs_kwonly_and_kwargs() -> None:
+    source = """\
+def configure(path: str = "x", *items, enabled: bool = True, **opts) -> None:
+    pass
+"""
+
+    result = extract_python_graph("pkg/config.py", source)
+
+    node = next(n for n in result.nodes if n.name == "configure")
+    assert node.signature.startswith("def configure(")
+    assert "path: str = 'x'" in node.signature or 'path: str = "x"' in node.signature
+    assert "*items" in node.signature
+    assert "enabled: bool = True" in node.signature
+    assert "**opts" in node.signature
+    assert node.signature.endswith("-> None")
