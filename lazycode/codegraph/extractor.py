@@ -188,12 +188,24 @@ class _PythonGraphVisitor(ast.NodeVisitor):
     def _collect_callable_symbols(self, body: list[ast.stmt], parent_qualified: str) -> dict[str, str]:
         symbols: dict[str, str] = {}
         for statement in body:
-            if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
-                qualified = self._qualify(parent_qualified, statement.name)
-                node_id = self._unique_symbol_node_id(f"{self.file_path}::{qualified}", statement)
-                self._precollected_node_ids[id(statement)] = node_id
-                symbols[statement.name] = node_id
+            self._collect_callable_symbol_from_statement(statement, parent_qualified, symbols)
         return symbols
+
+    def _collect_callable_symbol_from_statement(
+        self, statement: ast.AST, parent_qualified: str, symbols: dict[str, str]
+    ) -> None:
+        if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
+            qualified = self._qualify(parent_qualified, statement.name)
+            node_id = self._unique_symbol_node_id(f"{self.file_path}::{qualified}", statement)
+            self._precollected_node_ids[id(statement)] = node_id
+            symbols[statement.name] = node_id
+            return
+        if isinstance(statement, ast.ClassDef):
+            return
+
+        for child in ast.iter_child_nodes(statement):
+            if isinstance(child, ast.stmt | ast.ExceptHandler):
+                self._collect_callable_symbol_from_statement(child, parent_qualified, symbols)
 
     def _node_id_for(self, node: ast.FunctionDef | ast.AsyncFunctionDef, qualified: str) -> str:
         precollected_id = self._precollected_node_ids.get(id(node))
@@ -219,7 +231,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             names.add(arguments.kwarg.arg)
         return names
 
-    def _collect_statement_binding_names(self, statement: ast.stmt) -> set[str]:
+    def _collect_statement_binding_names(self, statement: ast.AST) -> set[str]:
         if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
             return set()
 
@@ -228,9 +240,23 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             names.update(self._collect_target_names(*statement.targets))
         elif isinstance(statement, ast.AnnAssign | ast.AugAssign):
             names.update(self._collect_target_names(statement.target))
+        elif isinstance(statement, ast.Import):
+            names.update(alias.asname or alias.name.split(".", 1)[0] for alias in statement.names)
+        elif isinstance(statement, ast.ImportFrom):
+            names.update(alias.asname or alias.name for alias in statement.names)
+        elif isinstance(statement, ast.For | ast.AsyncFor):
+            names.update(self._collect_target_names(statement.target))
+        elif isinstance(statement, ast.With | ast.AsyncWith):
+            for item in statement.items:
+                if item.optional_vars is not None:
+                    names.update(self._collect_target_names(item.optional_vars))
+        elif isinstance(statement, ast.ExceptHandler) and statement.name is not None:
+            names.add(statement.name)
 
         for child in ast.iter_child_nodes(statement):
-            if isinstance(child, ast.stmt):
+            if isinstance(child, ast.NamedExpr):
+                names.update(self._collect_target_names(child.target))
+            elif isinstance(child, ast.stmt | ast.ExceptHandler):
                 names.update(self._collect_statement_binding_names(child))
         return names
 

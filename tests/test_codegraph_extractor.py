@@ -336,6 +336,65 @@ def run() -> None:
     ]
 
 
+def test_import_shadowing_prevents_outer_call_resolution() -> None:
+    source = """\
+def helper() -> None:
+    pass
+
+
+def run() -> None:
+    import helper
+    helper()
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    calls = {(e.source, e.target, e.kind) for e in result.edges if e.kind == "calls"}
+    assert ("pkg/service.py::run", "pkg/service.py::helper", "calls") not in calls
+    unresolved = {(ref.source, ref.name, ref.kind) for ref in result.unresolved_refs}
+    assert ("pkg/service.py::run", "helper", "calls") in unresolved
+
+
+def test_for_loop_target_shadowing_prevents_outer_call_resolution() -> None:
+    source = """\
+def helper() -> None:
+    pass
+
+
+def run_loop(items) -> None:
+    for helper in items:
+        pass
+    helper()
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    calls = {(e.source, e.target, e.kind) for e in result.edges if e.kind == "calls"}
+    assert ("pkg/service.py::run_loop", "pkg/service.py::helper", "calls") not in calls
+    unresolved = {(ref.source, ref.name, ref.kind) for ref in result.unresolved_refs}
+    assert ("pkg/service.py::run_loop", "helper", "calls") in unresolved
+
+
+def test_local_function_defined_inside_if_resolves_later_bare_call() -> None:
+    source = """\
+def run(flag) -> None:
+    if flag:
+        def helper() -> None:
+            pass
+    helper()
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    calls = {(e.source, e.target, e.kind) for e in result.edges if e.kind == "calls"}
+    assert ("pkg/service.py::run", "pkg/service.py::run.helper", "calls") in calls
+    assert not [
+        ref
+        for ref in result.unresolved_refs
+        if ref.source == "pkg/service.py::run" and ref.name == "helper"
+    ]
+
+
 def test_records_unresolved_attribute_call() -> None:
     source = """\
 def run(client):
