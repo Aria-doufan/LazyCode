@@ -108,8 +108,8 @@ class CodeGraphStore:
             self._conn.executemany(
                 """
                 INSERT INTO unresolved_refs (
-                    source, name, kind, line, col, file_path
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    source, name, kind, line, col, file_path, is_resolvable
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -119,6 +119,7 @@ class CodeGraphStore:
                         ref.line,
                         ref.col,
                         ref.file_path,
+                        int(ref.is_resolvable),
                     )
                     for ref in unresolved_refs
                 ],
@@ -158,7 +159,7 @@ class CodeGraphStore:
     def get_unresolved_refs(self) -> list[UnresolvedReference]:
         rows = self._conn.execute(
             """
-            SELECT source, name, kind, line, col, file_path
+            SELECT source, name, kind, line, col, file_path, is_resolvable
             FROM unresolved_refs
             ORDER BY file_path, line
             """,
@@ -171,6 +172,7 @@ class CodeGraphStore:
                 line=int(row["line"]),
                 col=int(row["col"]),
                 file_path=str(row["file_path"]),
+                is_resolvable=bool(row["is_resolvable"]),
             )
             for row in rows
         ]
@@ -182,10 +184,11 @@ class CodeGraphStore:
             SELECT * FROM nodes
             WHERE kind = 'function'
               AND name = ?
-            ORDER BY length(qualified_name), file_path
+              AND qualified_name = ?
+            ORDER BY file_path
             LIMIT 1
             """,
-            (short_name,),
+            (short_name, short_name),
         ).fetchone()
         if row is None:
             return None
@@ -322,6 +325,7 @@ class CodeGraphStore:
                 line INTEGER NOT NULL,
                 col INTEGER NOT NULL,
                 file_path TEXT NOT NULL,
+                is_resolvable INTEGER NOT NULL DEFAULT 1,
                 FOREIGN KEY (source) REFERENCES nodes(id) ON DELETE CASCADE,
                 FOREIGN KEY (file_path) REFERENCES files(path) ON DELETE CASCADE
             );
@@ -335,3 +339,11 @@ class CodeGraphStore:
             CREATE INDEX IF NOT EXISTS idx_unresolved_refs_file_path ON unresolved_refs(file_path);
             """
         )
+        columns = {
+            str(row["name"])
+            for row in self._conn.execute("PRAGMA table_info(unresolved_refs)").fetchall()
+        }
+        if "is_resolvable" not in columns:
+            self._conn.execute(
+                "ALTER TABLE unresolved_refs ADD COLUMN is_resolvable INTEGER NOT NULL DEFAULT 1"
+            )

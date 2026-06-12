@@ -63,3 +63,4 @@ class UnresolvedReference:
     line: int
     col: int
     file_path: str
+    is_resolvable: bool = True

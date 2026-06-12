@@ -66,8 +66,10 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             )
         )
         self.scope_stack.append((module_id, "", False, False))
-        module_symbols = self._collect_module_callable_symbols(tree.body)
-        self.callable_scope_stack.append(_CallableScope(module_symbols, True))
+        module_symbols, module_shadowed_names = self._collect_module_resolution_state(tree.body)
+        self.callable_scope_stack.append(
+            _CallableScope(module_symbols, True, module_shadowed_names)
+        )
         self.visit(tree)
         self.callable_scope_stack.pop()
         self.scope_stack.pop()
@@ -180,6 +182,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
                         line=getattr(node, "lineno", 0),
                         col=getattr(node, "col_offset", 0),
                         file_path=self.file_path,
+                        is_resolvable=self._is_resolvable_unresolved_reference(call_name),
                     )
                 )
         self.generic_visit(node)
@@ -190,35 +193,60 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             self._collect_callable_symbol_from_statement(statement, parent_qualified, symbols)
         return symbols
 
-    def _collect_module_callable_symbols(self, body: list[ast.stmt]) -> dict[str, str]:
+    def _collect_module_resolution_state(
+        self, body: list[ast.stmt]
+    ) -> tuple[dict[str, str], set[str]]:
         final_bindings: dict[str, str | None] = {}
+        unsafe_bindings: dict[str, bool] = {}
         for statement in body:
-            self._collect_module_binding_from_statement(statement, final_bindings)
-        return {name: node_id for name, node_id in final_bindings.items() if node_id is not None}
+            self._collect_module_binding_from_statement(
+                statement, final_bindings, unsafe_bindings
+            )
+        symbols = {
+            name: node_id for name, node_id in final_bindings.items() if node_id is not None
+        }
+        shadowed_names = {
+            name
+            for name, node_id in final_bindings.items()
+            if node_id is None and unsafe_bindings.get(name, False)
+        }
+        return symbols, shadowed_names
 
     def _collect_module_binding_from_statement(
-        self, statement: ast.AST, final_bindings: dict[str, str | None]
+        self,
+        statement: ast.AST,
+        final_bindings: dict[str, str | None],
+        unsafe_bindings: dict[str, bool],
     ) -> None:
         if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
             qualified = self._qualify("", statement.name)
             node_id = self._unique_symbol_node_id(f"{self.file_path}::{qualified}", statement)
             self._precollected_node_ids[id(statement)] = node_id
             final_bindings[statement.name] = node_id
+            unsafe_bindings[statement.name] = False
             return
         if isinstance(statement, ast.ClassDef):
             final_bindings[statement.name] = None
+            unsafe_bindings[statement.name] = True
             return
         if isinstance(statement, ast.ImportFrom) and any(alias.name == "*" for alias in statement.names):
             for name in list(final_bindings):
                 final_bindings[name] = None
+                unsafe_bindings[name] = True
             return
 
-        for name in self._collect_direct_statement_binding_names(statement):
+        for name in self._collect_direct_module_binding_names(statement):
             final_bindings[name] = None
+            unsafe_bindings[name] = True
+        for name in self._collect_direct_module_import_names(statement):
+            final_bindings[name] = None
+            unsafe_bindings[name] = False
 
         for child in ast.iter_child_nodes(statement):
             if isinstance(child, ast.stmt | ast.ExceptHandler | ast.match_case):
-                self._collect_module_binding_from_statement(child, final_bindings)
+                self._collect_module_binding_from_statement(
+                    child, final_bindings, unsafe_bindings
+                )
 
     def _collect_callable_symbol_from_statement(
         self, statement: ast.AST, parent_qualified: str, symbols: dict[str, str]
@@ -267,6 +295,18 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         if arguments.kwarg is not None:
             names.add(arguments.kwarg.arg)
         return names
+
+    def _collect_direct_module_binding_names(self, statement: ast.AST) -> set[str]:
+        names = self._collect_direct_statement_binding_names(statement)
+        names.difference_update(self._collect_direct_module_import_names(statement))
+        return names
+
+    def _collect_direct_module_import_names(self, statement: ast.AST) -> set[str]:
+        if isinstance(statement, ast.Import):
+            return {alias.asname or alias.name.split(".", 1)[0] for alias in statement.names}
+        if isinstance(statement, ast.ImportFrom):
+            return {alias.asname or alias.name for alias in statement.names if alias.name != "*"}
+        return set()
 
     def _collect_direct_statement_binding_names(self, statement: ast.AST) -> set[str]:
         names: set[str] = set()
@@ -369,6 +409,16 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             if target_id is not None:
                 return target_id
         return None
+
+    def _is_resolvable_unresolved_reference(self, call_name: str) -> bool:
+        if "." in call_name:
+            return False
+        for scope in reversed(self.callable_scope_stack):
+            if call_name in scope.shadowed_names:
+                return False
+            if not scope.bare_call_visible and call_name in scope.symbols:
+                return False
+        return True
 
     def _unique_symbol_node_id(self, base_id: str, node: ast.AST) -> str:
         if base_id not in self._symbol_node_ids:

@@ -127,6 +127,52 @@ def test_indexer_does_not_resolve_dotted_unresolved_calls_by_last_segment(
     assert store.get_callers("send") == []
 
 
+def test_indexer_does_not_resolve_parameter_shadowed_bare_call(
+    tmp_path: Path,
+) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "service.py").write_text(
+        "def helper():\n"
+        "    pass\n\n"
+        "def run(helper):\n"
+        "    helper()\n",
+        encoding="utf-8",
+    )
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    indexer.index_all()
+    callers = store.get_callers("helper")
+
+    assert all(caller.name != "run" for caller in callers)
+
+
+def test_indexer_does_not_resolve_cross_file_bare_call_to_nested_function(
+    tmp_path: Path,
+) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "nested.py").write_text(
+        "def outer():\n"
+        "    def helper():\n"
+        "        pass\n",
+        encoding="utf-8",
+    )
+    (pkg / "service.py").write_text(
+        "def run():\n"
+        "    helper()\n",
+        encoding="utf-8",
+    )
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    indexer.index_all()
+    callers = store.get_callers("helper")
+
+    assert all(caller.name != "run" for caller in callers)
+
+
 def test_indexer_does_not_resolve_bare_method_calls_to_sibling_methods(
     tmp_path: Path,
 ) -> None:
