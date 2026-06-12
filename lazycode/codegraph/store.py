@@ -179,20 +179,20 @@ class CodeGraphStore:
 
     def find_callable_by_name(self, name: str) -> NodeRecord | None:
         short_name = name.rsplit(".", 1)[-1]
-        row = self._conn.execute(
+        rows = self._conn.execute(
             """
             SELECT * FROM nodes
             WHERE kind = 'function'
               AND name = ?
               AND qualified_name = ?
             ORDER BY file_path
-            LIMIT 1
+            LIMIT 2
             """,
             (short_name, short_name),
-        ).fetchone()
-        if row is None:
+        ).fetchall()
+        if len(rows) != 1:
             return None
-        return self._node_from_row(row)
+        return self._node_from_row(rows[0])
 
     def insert_edges(self, edges: list[EdgeRecord]) -> None:
         with self._conn:

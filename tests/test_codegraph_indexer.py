@@ -109,6 +109,67 @@ def test_indexer_resolves_cross_file_function_calls(tmp_path: Path) -> None:
     assert [(n.name, n.file_path) for n in callers] == [("run", "pkg/service.py")]
 
 
+def test_indexer_does_not_resolve_ambiguous_top_level_function_calls(
+    tmp_path: Path,
+) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "helpers_a.py").write_text("def helper():\n    pass\n", encoding="utf-8")
+    (pkg / "helpers_b.py").write_text("def helper():\n    pass\n", encoding="utf-8")
+    (pkg / "service.py").write_text(
+        "def run():\n    helper()\n",
+        encoding="utf-8",
+    )
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    indexer.index_all()
+    callers = store.get_callers("helper")
+
+    assert all(caller.name != "run" for caller in callers)
+
+
+def test_indexer_does_not_resolve_calls_after_star_import_to_unrelated_helper(
+    tmp_path: Path,
+) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "helpers.py").write_text("def helper():\n    pass\n", encoding="utf-8")
+    (pkg / "service.py").write_text(
+        "from plugin import *\n\ndef run():\n    helper()\n",
+        encoding="utf-8",
+    )
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    indexer.index_all()
+    callers = store.get_callers("helper")
+
+    assert all(caller.name != "run" for caller in callers)
+
+
+def test_indexer_plain_module_import_shadows_same_named_top_level_function(
+    tmp_path: Path,
+) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "service.py").write_text(
+        "def helper():\n"
+        "    pass\n\n"
+        "import helper\n\n"
+        "def run():\n"
+        "    helper()\n",
+        encoding="utf-8",
+    )
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    indexer.index_all()
+    callers = store.get_callers("helper")
+
+    assert all(caller.name != "run" for caller in callers)
+
+
 def test_indexer_does_not_resolve_dotted_unresolved_calls_by_last_segment(
     tmp_path: Path,
 ) -> None:

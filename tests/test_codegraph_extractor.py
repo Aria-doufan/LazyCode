@@ -269,6 +269,52 @@ def run(helper) -> None:
     assert ("pkg/service.py::run", "helper", "calls") in unresolved
 
 
+def test_lambda_parameter_shadowing_prevents_outer_call_resolution() -> None:
+    source = """\
+def helper() -> None:
+    pass
+
+
+def run() -> None:
+    cb = lambda helper: helper()
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    calls = {(e.source, e.target, e.kind) for e in result.edges if e.kind == "calls"}
+    assert ("pkg/service.py::run", "pkg/service.py::helper", "calls") not in calls
+    refs = [
+        ref
+        for ref in result.unresolved_refs
+        if ref.source == "pkg/service.py::run" and ref.name == "helper"
+    ]
+    assert refs
+    assert all(not ref.is_resolvable for ref in refs)
+
+
+def test_comprehension_target_shadowing_prevents_outer_call_resolution() -> None:
+    source = """\
+def helper() -> None:
+    pass
+
+
+def run(items):
+    return [helper() for helper in items]
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    calls = {(e.source, e.target, e.kind) for e in result.edges if e.kind == "calls"}
+    assert ("pkg/service.py::run", "pkg/service.py::helper", "calls") not in calls
+    refs = [
+        ref
+        for ref in result.unresolved_refs
+        if ref.source == "pkg/service.py::run" and ref.name == "helper"
+    ]
+    assert refs
+    assert all(not ref.is_resolvable for ref in refs)
+
+
 def test_assignment_shadowing_prevents_outer_call_resolution() -> None:
     source = """\
 def helper() -> None:

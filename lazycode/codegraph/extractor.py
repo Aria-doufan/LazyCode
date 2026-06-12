@@ -19,6 +19,7 @@ class _CallableScope:
     symbols: dict[str, str]
     bare_call_visible: bool
     shadowed_names: set[str] = field(default_factory=set)
+    unsafe_unknown_names: bool = False
 
 
 def extract_python_graph(file_path: str, source: str) -> ExtractionResult:
@@ -66,9 +67,18 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             )
         )
         self.scope_stack.append((module_id, "", False, False))
-        module_symbols, module_shadowed_names = self._collect_module_resolution_state(tree.body)
+        (
+            module_symbols,
+            module_shadowed_names,
+            module_has_star_import,
+        ) = self._collect_module_resolution_state(tree.body)
         self.callable_scope_stack.append(
-            _CallableScope(module_symbols, True, module_shadowed_names)
+            _CallableScope(
+                module_symbols,
+                True,
+                module_shadowed_names,
+                module_has_star_import,
+            )
         )
         self.visit(tree)
         self.callable_scope_stack.pop()
@@ -187,6 +197,35 @@ class _PythonGraphVisitor(ast.NodeVisitor):
                 )
         self.generic_visit(node)
 
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        self.callable_scope_stack.append(
+            _CallableScope({}, True, self._collect_argument_names(node.args))
+        )
+        self.generic_visit(node)
+        self.callable_scope_stack.pop()
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        self._visit_comprehension(node)
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        self._visit_comprehension(node)
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+        self._visit_comprehension(node)
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        self._visit_comprehension(node)
+
+    def _visit_comprehension(
+        self, node: ast.ListComp | ast.SetComp | ast.GeneratorExp | ast.DictComp
+    ) -> None:
+        shadowed_names: set[str] = set()
+        for generator in node.generators:
+            shadowed_names.update(self._collect_target_names(generator.target))
+        self.callable_scope_stack.append(_CallableScope({}, True, shadowed_names))
+        self.generic_visit(node)
+        self.callable_scope_stack.pop()
+
     def _collect_callable_symbols(self, body: list[ast.stmt], parent_qualified: str) -> dict[str, str]:
         symbols: dict[str, str] = {}
         for statement in body:
@@ -195,13 +234,15 @@ class _PythonGraphVisitor(ast.NodeVisitor):
 
     def _collect_module_resolution_state(
         self, body: list[ast.stmt]
-    ) -> tuple[dict[str, str], set[str]]:
+    ) -> tuple[dict[str, str], set[str], bool]:
         final_bindings: dict[str, str | None] = {}
         unsafe_bindings: dict[str, bool] = {}
+        has_star_import = False
         for statement in body:
-            self._collect_module_binding_from_statement(
+            if self._collect_module_binding_from_statement(
                 statement, final_bindings, unsafe_bindings
-            )
+            ):
+                has_star_import = True
         symbols = {
             name: node_id for name, node_id in final_bindings.items() if node_id is not None
         }
@@ -210,43 +251,46 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             for name, node_id in final_bindings.items()
             if node_id is None and unsafe_bindings.get(name, False)
         }
-        return symbols, shadowed_names
+        return symbols, shadowed_names, has_star_import
 
     def _collect_module_binding_from_statement(
         self,
         statement: ast.AST,
         final_bindings: dict[str, str | None],
         unsafe_bindings: dict[str, bool],
-    ) -> None:
+    ) -> bool:
+        has_star_import = False
         if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
             qualified = self._qualify("", statement.name)
             node_id = self._unique_symbol_node_id(f"{self.file_path}::{qualified}", statement)
             self._precollected_node_ids[id(statement)] = node_id
             final_bindings[statement.name] = node_id
             unsafe_bindings[statement.name] = False
-            return
+            return has_star_import
         if isinstance(statement, ast.ClassDef):
             final_bindings[statement.name] = None
             unsafe_bindings[statement.name] = True
-            return
+            return has_star_import
         if isinstance(statement, ast.ImportFrom) and any(alias.name == "*" for alias in statement.names):
             for name in list(final_bindings):
                 final_bindings[name] = None
                 unsafe_bindings[name] = True
-            return
+            return True
 
         for name in self._collect_direct_module_binding_names(statement):
             final_bindings[name] = None
             unsafe_bindings[name] = True
         for name in self._collect_direct_module_import_names(statement):
             final_bindings[name] = None
-            unsafe_bindings[name] = False
+            unsafe_bindings[name] = isinstance(statement, ast.Import)
 
         for child in ast.iter_child_nodes(statement):
             if isinstance(child, ast.stmt | ast.ExceptHandler | ast.match_case):
-                self._collect_module_binding_from_statement(
+                if self._collect_module_binding_from_statement(
                     child, final_bindings, unsafe_bindings
-                )
+                ):
+                    has_star_import = True
+        return has_star_import
 
     def _collect_callable_symbol_from_statement(
         self, statement: ast.AST, parent_qualified: str, symbols: dict[str, str]
@@ -417,6 +461,8 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             if call_name in scope.shadowed_names:
                 return False
             if not scope.bare_call_visible and call_name in scope.symbols:
+                return False
+            if scope.unsafe_unknown_names and call_name not in scope.symbols:
                 return False
         return True
 
