@@ -43,12 +43,10 @@ class CodeGraphIndexTool(Tool):
         self.default_project_root = Path(default_project_root) if default_project_root else Path.cwd()
 
     async def execute(self, params: CodeGraphIndexParams) -> ToolResult:
-        project_root = _project_root(self.default_project_root, params.project_path)
-        if isinstance(project_root, ToolResult):
-            return project_root
-
-        store = CodeGraphStore(default_db_path(project_root))
+        store: CodeGraphStore | None = None
         try:
+            project_root = _project_root(self.default_project_root, params.project_path)
+            store = CodeGraphStore(default_db_path(project_root))
             result = CodeGraphIndexer(project_root, store).index_all()
             return ToolResult(
                 output=(
@@ -58,10 +56,13 @@ class CodeGraphIndexTool(Tool):
                     f"removed={result['removed']}"
                 )
             )
+        except ValueError as exc:
+            return ToolResult(output=f"Error: {exc}", is_error=True)
         except Exception as exc:
             return ToolResult(output=f"Error updating CodeGraph index: {exc}", is_error=True)
         finally:
-            store.close()
+            if store is not None:
+                store.close()
 
 
 class CodeGraphExploreTool(Tool):
@@ -76,14 +77,13 @@ class CodeGraphExploreTool(Tool):
         self.default_project_root = Path(default_project_root) if default_project_root else Path.cwd()
 
     async def execute(self, params: CodeGraphExploreParams) -> ToolResult:
-        project_root = _project_root(self.default_project_root, params.project_path)
-        if isinstance(project_root, ToolResult):
-            return project_root
-        if not default_db_path(project_root).exists():
-            return ToolResult(output=_NO_INDEX_MESSAGE)
-
-        store = CodeGraphStore(default_db_path(project_root))
+        store: CodeGraphStore | None = None
         try:
+            project_root = _project_root(self.default_project_root, params.project_path)
+            if not default_db_path(project_root).exists():
+                return ToolResult(output=_NO_INDEX_MESSAGE)
+
+            store = CodeGraphStore(default_db_path(project_root))
             return ToolResult(
                 output=build_explore_context(
                     project_root,
@@ -92,10 +92,13 @@ class CodeGraphExploreTool(Tool):
                     max_nodes=params.max_nodes,
                 )
             )
+        except ValueError as exc:
+            return ToolResult(output=f"Error: {exc}", is_error=True)
         except Exception as exc:
             return ToolResult(output=f"Error exploring CodeGraph index: {exc}", is_error=True)
         finally:
-            store.close()
+            if store is not None:
+                store.close()
 
 
 class CodeGraphNodeTool(Tool):
@@ -110,22 +113,24 @@ class CodeGraphNodeTool(Tool):
         self.default_project_root = Path(default_project_root) if default_project_root else Path.cwd()
 
     async def execute(self, params: CodeGraphNodeParams) -> ToolResult:
-        project_root = _project_root(self.default_project_root, params.project_path)
-        if isinstance(project_root, ToolResult):
-            return project_root
-        if not default_db_path(project_root).exists():
-            return ToolResult(output=_NO_INDEX_MESSAGE)
-
-        store = CodeGraphStore(default_db_path(project_root))
+        store: CodeGraphStore | None = None
         try:
+            project_root = _project_root(self.default_project_root, params.project_path)
+            if not default_db_path(project_root).exists():
+                return ToolResult(output=_NO_INDEX_MESSAGE)
+
+            store = CodeGraphStore(default_db_path(project_root))
             nodes = store.search_nodes(params.symbol, limit=5)
             if not nodes:
                 return ToolResult(output=f"No indexed symbols matched: {params.symbol}")
             return ToolResult(output=_render_nodes(project_root, nodes))
+        except ValueError as exc:
+            return ToolResult(output=f"Error: {exc}", is_error=True)
         except Exception as exc:
             return ToolResult(output=f"Error reading CodeGraph node: {exc}", is_error=True)
         finally:
-            store.close()
+            if store is not None:
+                store.close()
 
 
 class CodeGraphCallersTool(Tool):
@@ -140,41 +145,50 @@ class CodeGraphCallersTool(Tool):
         self.default_project_root = Path(default_project_root) if default_project_root else Path.cwd()
 
     async def execute(self, params: CodeGraphCallersParams) -> ToolResult:
-        project_root = _project_root(self.default_project_root, params.project_path)
-        if isinstance(project_root, ToolResult):
-            return project_root
-        if not default_db_path(project_root).exists():
-            return ToolResult(output=_NO_INDEX_MESSAGE)
-
-        store = CodeGraphStore(default_db_path(project_root))
+        store: CodeGraphStore | None = None
         try:
+            project_root = _project_root(self.default_project_root, params.project_path)
+            if not default_db_path(project_root).exists():
+                return ToolResult(output=_NO_INDEX_MESSAGE)
+
+            store = CodeGraphStore(default_db_path(project_root))
             callers = store.get_callers(params.symbol, limit=params.limit)
             if not callers:
                 return ToolResult(output=f"No callers found for {params.symbol}.")
             lines = [f"Callers of {params.symbol}:"]
             lines.extend(f"- {_format_node_location(node)}" for node in callers)
             return ToolResult(output="\n".join(lines))
+        except ValueError as exc:
+            return ToolResult(output=f"Error: {exc}", is_error=True)
         except Exception as exc:
             return ToolResult(output=f"Error reading CodeGraph callers: {exc}", is_error=True)
         finally:
-            store.close()
+            if store is not None:
+                store.close()
 
 
 _NO_INDEX_MESSAGE = "No CodeGraph index found. Run CodeGraphIndex first, then retry this query."
 
 
-def _project_root(default_root: Path, requested: str) -> Path | ToolResult:
-    root = Path(requested) if requested else default_root
-    if not root.is_absolute():
-        root = default_root / root
+def _project_root(default_root: Path, requested: str) -> Path:
     try:
+        default_root = default_root.resolve()
+        root = Path(requested) if requested else default_root
+        if not root.is_absolute():
+            root = default_root / root
         root = root.resolve()
     except OSError as exc:
-        return ToolResult(output=f"Error resolving project path: {exc}", is_error=True)
+        raise ValueError(f"resolving project path failed: {exc}") from exc
+
+    try:
+        root.relative_to(default_root)
+    except ValueError as exc:
+        raise ValueError(f"project path must be inside default project root: {default_root}") from exc
+
     if not root.exists():
-        return ToolResult(output=f"Error: project path not found: {root}", is_error=True)
+        raise ValueError(f"project path not found: {root}")
     if not root.is_dir():
-        return ToolResult(output=f"Error: project path is not a directory: {root}", is_error=True)
+        raise ValueError(f"project path is not a directory: {root}")
     return root
 
 

@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from lazycode.tools import codegraph as codegraph_tools
 from lazycode.tools.codegraph import (
     CodeGraphCallersTool,
     CodeGraphExploreTool,
@@ -26,6 +27,49 @@ async def test_codegraph_index_tool_builds_index(tmp_path: Path) -> None:
     assert not result.is_error
     assert "indexed=1" in result.output
     assert (tmp_path / ".lazycode" / "codegraph.sqlite").exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("project_path", ["..", "{sibling}"])
+async def test_codegraph_index_tool_rejects_paths_outside_default_root(
+    tmp_path: Path,
+    project_path: str,
+) -> None:
+    default_root = tmp_path / "root"
+    default_root.mkdir()
+    sibling = tmp_path / "sibling"
+    sibling.mkdir()
+    requested = str(sibling) if project_path == "{sibling}" else project_path
+
+    tool = CodeGraphIndexTool(default_project_root=default_root)
+    result = await tool.execute(CodeGraphIndexParams(project_path=requested))
+
+    assert result.is_error
+    assert "inside default project root" in result.output
+    assert not (tmp_path / ".lazycode").exists()
+    assert not (sibling / ".lazycode").exists()
+
+
+@pytest.mark.asyncio
+async def test_codegraph_explore_tool_returns_error_when_store_construction_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / ".lazycode" / "codegraph.sqlite"
+    db_path.parent.mkdir()
+    db_path.write_text("not a sqlite database", encoding="utf-8")
+
+    def raise_store_error(db_path: Path) -> object:
+        raise PermissionError("store denied")
+
+    monkeypatch.setattr(codegraph_tools, "CodeGraphStore", raise_store_error)
+    tool = CodeGraphExploreTool(default_project_root=tmp_path)
+
+    result = await tool.execute(tool.params_model(query="run"))
+
+    assert result.is_error
+    assert "Error exploring CodeGraph index" in result.output
+    assert "store denied" in result.output
 
 
 @pytest.mark.asyncio
