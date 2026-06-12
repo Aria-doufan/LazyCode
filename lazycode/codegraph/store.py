@@ -136,13 +136,18 @@ class CodeGraphStore:
         return [self._node_from_row(row) for row in rows]
 
     def search_nodes(self, query: str, limit: int = 20) -> list[NodeRecord]:
-        pattern = f"%{query}%"
+        escaped_query = (
+            query.replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
+        pattern = f"%{escaped_query}%"
         rows = self._conn.execute(
             """
             SELECT * FROM nodes
-            WHERE name LIKE ? COLLATE NOCASE
-               OR qualified_name LIKE ? COLLATE NOCASE
-               OR file_path LIKE ? COLLATE NOCASE
+            WHERE name COLLATE NOCASE LIKE ? ESCAPE '\\'
+               OR qualified_name COLLATE NOCASE LIKE ? ESCAPE '\\'
+               OR file_path COLLATE NOCASE LIKE ? ESCAPE '\\'
             ORDER BY name, qualified_name, file_path, id
             LIMIT ?
             """,

@@ -86,3 +86,75 @@ def test_store_replaces_file_graph(tmp_path: Path) -> None:
     assert store.get_file_hash("pkg/a.py") == "abc"
     assert store.get_nodes_by_file("pkg/a.py") == [node]
     assert store.search_nodes("hell") == [node]
+
+
+def test_search_nodes_treats_like_metacharacters_literally(tmp_path: Path) -> None:
+    db_path = tmp_path / "codegraph.sqlite"
+    store = CodeGraphStore(db_path)
+    file_record = FileRecord(
+        path="pkg/patterns.py",
+        content_hash="abc",
+        language="python",
+        size=12,
+        indexed_at=1.0,
+        node_count=4,
+    )
+    literal_underscore = NodeRecord(
+        id="pkg/patterns.py::a_b",
+        kind="function",
+        name="a_b",
+        qualified_name="a_b",
+        file_path="pkg/patterns.py",
+        language="python",
+        start_line=1,
+        end_line=2,
+        signature="def a_b()",
+    )
+    wildcard_underscore_match = NodeRecord(
+        id="pkg/patterns.py::axb",
+        kind="function",
+        name="axb",
+        qualified_name="axb",
+        file_path="pkg/patterns.py",
+        language="python",
+        start_line=3,
+        end_line=4,
+        signature="def axb()",
+    )
+    literal_percent = NodeRecord(
+        id="pkg/patterns.py::a%b",
+        kind="function",
+        name="a%b",
+        qualified_name="a%b",
+        file_path="pkg/patterns.py",
+        language="python",
+        start_line=5,
+        end_line=6,
+        signature="def a_percent_b()",
+    )
+    wildcard_percent_match = NodeRecord(
+        id="pkg/patterns.py::azzzb",
+        kind="function",
+        name="azzzb",
+        qualified_name="azzzb",
+        file_path="pkg/patterns.py",
+        language="python",
+        start_line=7,
+        end_line=8,
+        signature="def azzzb()",
+    )
+
+    store.replace_file_graph(
+        file_record,
+        [
+            literal_underscore,
+            wildcard_underscore_match,
+            literal_percent,
+            wildcard_percent_match,
+        ],
+        [],
+        [],
+    )
+
+    assert store.search_nodes("a_b") == [literal_underscore]
+    assert store.search_nodes("a%b") == [literal_percent]
