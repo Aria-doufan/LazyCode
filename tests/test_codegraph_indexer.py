@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 from lazycode.codegraph.indexer import CodeGraphIndexer, default_db_path
@@ -37,3 +38,55 @@ def test_indexer_skips_unchanged_files(tmp_path: Path) -> None:
 
     assert first == {"indexed": 1, "skipped": 0, "removed": 0}
     assert second == {"indexed": 0, "skipped": 1, "removed": 0}
+
+
+def test_indexer_decodes_declared_python_source_encoding(tmp_path: Path) -> None:
+    source = tmp_path / "pkg" / "latin1.py"
+    source.parent.mkdir()
+    source.write_bytes(b"# coding: latin-1\n\ndef caf\xe9():\n    return 'ol\xe9'\n")
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    result = indexer.index_all()
+
+    assert result == {"indexed": 1, "skipped": 0, "removed": 0}
+    nodes = store.search_nodes("café")
+    assert len(nodes) == 1
+    assert nodes[0].file_path == "pkg/latin1.py"
+
+
+def test_indexer_stores_hash_of_raw_file_bytes(tmp_path: Path) -> None:
+    source = tmp_path / "pkg" / "service.py"
+    source.parent.mkdir()
+    source.write_bytes(b"def run():\n    pass\n")
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    indexer.index_all()
+    first_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+    assert store.get_file_hash("pkg/service.py") == first_hash
+
+    source.write_bytes(b"def run():\r\n    pass\r\n")
+    result = indexer.index_all()
+    second_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+
+    assert result == {"indexed": 1, "skipped": 0, "removed": 0}
+    assert second_hash != first_hash
+    assert store.get_file_hash("pkg/service.py") == second_hash
+
+
+def test_indexer_does_not_index_skipped_directory_subtrees(tmp_path: Path) -> None:
+    skipped = tmp_path / ".venv" / "pkg" / "hidden.py"
+    skipped.parent.mkdir(parents=True)
+    skipped.write_text("def hidden_from_index():\n    pass\n", encoding="utf-8")
+    visible = tmp_path / "pkg" / "visible.py"
+    visible.parent.mkdir()
+    visible.write_text("def visible_in_index():\n    pass\n", encoding="utf-8")
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    result = indexer.index_all()
+
+    assert result == {"indexed": 1, "skipped": 0, "removed": 0}
+    assert store.search_nodes("visible_in_index")[0].file_path == "pkg/visible.py"
+    assert store.search_nodes("hidden_from_index") == []

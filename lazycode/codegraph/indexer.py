@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import time
+import tokenize
 from pathlib import Path
 
 from lazycode.codegraph.extractor import extract_python_graph
@@ -25,8 +27,9 @@ class CodeGraphIndexer:
         skipped = 0
 
         for path in self._iter_python_files():
-            source = path.read_text(encoding="utf-8")
-            content_hash = hashlib.sha256(source.encode("utf-8")).hexdigest()
+            raw_bytes = path.read_bytes()
+            source = self._read_python_source(path)
+            content_hash = hashlib.sha256(raw_bytes).hexdigest()
             file_path = path.relative_to(self.project_root).as_posix()
 
             if self.store.get_file_hash(file_path) == content_hash:
@@ -39,7 +42,7 @@ class CodeGraphIndexer:
                     path=file_path,
                     content_hash=content_hash,
                     language="python",
-                    size=len(source.encode("utf-8")),
+                    size=len(raw_bytes),
                     indexed_at=time.time(),
                     node_count=len(graph.nodes),
                 ),
@@ -52,9 +55,15 @@ class CodeGraphIndexer:
         return {"indexed": indexed, "skipped": skipped, "removed": 0}
 
     def _iter_python_files(self) -> list[Path]:
-        files = [
-            path
-            for path in self.project_root.rglob("*.py")
-            if not any(part in SKIP_DIRS for part in path.relative_to(self.project_root).parts)
-        ]
-        return sorted(files)
+        files: list[Path] = []
+        for root, dirs, filenames in os.walk(self.project_root):
+            dirs[:] = sorted(dirname for dirname in dirs if dirname not in SKIP_DIRS)
+            root_path = Path(root)
+            for filename in sorted(filenames):
+                if filename.endswith(".py"):
+                    files.append(root_path / filename)
+        return files
+
+    def _read_python_source(self, path: Path) -> str:
+        with tokenize.open(path) as source_file:
+            return source_file.read()
