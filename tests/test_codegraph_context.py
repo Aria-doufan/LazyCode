@@ -34,6 +34,21 @@ def test_render_node_source_returns_line_numbered_slice(tmp_path: Path) -> None:
     assert "3\t        return helper()" in output
 
 
+def test_render_node_source_respects_pep263_source_encoding(tmp_path: Path) -> None:
+    source = tmp_path / "latin1_module.py"
+    source.write_bytes(
+        "# coding: latin-1\n\ndef greet():\n    return 'caf\xe9'\n".encode("latin-1")
+    )
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    CodeGraphIndexer(tmp_path, store).index_all()
+    node = store.search_nodes("greet")[0]
+
+    output = render_node_source(tmp_path, node)
+
+    assert "3\tdef greet():" in output
+    assert "4\t    return 'café'" in output
+
+
 def test_build_explore_context_includes_symbols_and_source(tmp_path: Path) -> None:
     store = _index_project(tmp_path)
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tokenize
 from pathlib import Path
 
 from lazycode.codegraph.models import NodeRecord
@@ -21,7 +22,8 @@ def render_node_source(
     except ValueError:
         return f"Error: source path escapes project root: {node.file_path}"
 
-    lines = source_path.read_text(encoding="utf-8").splitlines()
+    with tokenize.open(source_path) as source_file:
+        lines = source_file.read().splitlines()
     start_line = max(node.start_line, 1)
     end_line = max(node.end_line, start_line)
 
