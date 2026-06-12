@@ -109,6 +109,24 @@ def test_indexer_resolves_cross_file_function_calls(tmp_path: Path) -> None:
     assert [(n.name, n.file_path) for n in callers] == [("run", "pkg/service.py")]
 
 
+def test_indexer_does_not_resolve_dotted_unresolved_calls_by_last_segment(
+    tmp_path: Path,
+) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "helpers.py").write_text("def send():\n    pass\n", encoding="utf-8")
+    (pkg / "service.py").write_text(
+        "def run(client):\n    client.send()\n",
+        encoding="utf-8",
+    )
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    indexer.index_all()
+
+    assert store.get_callers("send") == []
+
+
 def test_indexer_preserves_cross_file_callers_when_only_target_changes(tmp_path: Path) -> None:
     pkg = tmp_path / "pkg"
     pkg.mkdir()
