@@ -37,7 +37,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         self.result = result
         self.module_name = _module_name(file_path)
         self.scope_stack: list[tuple[str, str, bool, bool]] = []
-        self.callable_scope_stack: list[dict[str, str]] = []
+        self.callable_scope_stack: list[tuple[dict[str, str], bool]] = []
         self._precollected_node_ids: dict[int, str] = {}
         self._symbol_node_ids: set[str] = set()
         self._import_occurrence = 0
@@ -59,7 +59,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             )
         )
         self.scope_stack.append((module_id, "", False, False))
-        self.callable_scope_stack.append(self._collect_callable_symbols(tree.body, ""))
+        self.callable_scope_stack.append((self._collect_callable_symbols(tree.body, ""), True))
         self.visit(tree)
         self.callable_scope_stack.pop()
         self.scope_stack.pop()
@@ -103,7 +103,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         )
         self._add_contains_edge(parent_id, node_id, node)
         self.scope_stack.append((node_id, qualified, True, False))
-        self.callable_scope_stack.append(self._collect_callable_symbols(node.body, qualified))
+        self.callable_scope_stack.append((self._collect_callable_symbols(node.body, qualified), False))
         self.generic_visit(node)
         self.callable_scope_stack.pop()
         self.scope_stack.pop()
@@ -133,8 +133,9 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         )
         self._add_contains_edge(parent_id, node_id, node)
         self.scope_stack.append((node_id, qualified, False, True))
-        self.callable_scope_stack.append(self._collect_callable_symbols(node.body, qualified))
-        self.generic_visit(node)
+        self.callable_scope_stack.append((self._collect_callable_symbols(node.body, qualified), True))
+        for statement in node.body:
+            self.visit(statement)
         self.callable_scope_stack.pop()
         self.scope_stack.pop()
 
@@ -184,7 +185,9 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         return self._unique_symbol_node_id(f"{self.file_path}::{qualified}", node)
 
     def _resolve_callable(self, call_name: str) -> str | None:
-        for symbols in reversed(self.callable_scope_stack):
+        for symbols, bare_call_visible in reversed(self.callable_scope_stack):
+            if not bare_call_visible:
+                continue
             target_id = symbols.get(call_name)
             if target_id is not None:
                 return target_id

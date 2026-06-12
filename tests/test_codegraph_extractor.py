@@ -185,6 +185,46 @@ def run() -> None:
     assert ("pkg/service.py::run", "inner", "calls") in unresolved
 
 
+def test_definition_time_calls_do_not_create_body_call_edges() -> None:
+    source = """\
+def helper() -> None:
+    pass
+
+
+def decorate(fn):
+    return fn
+
+
+@decorate(helper())
+def run(x=helper()) -> None:
+    pass
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    calls = {(e.source, e.target, e.kind) for e in result.edges if e.kind == "calls"}
+    assert ("pkg/service.py::run", "pkg/service.py::helper", "calls") not in calls
+    assert ("pkg/service.py::run", "pkg/service.py::decorate", "calls") not in calls
+
+
+def test_bare_sibling_method_call_is_unresolved() -> None:
+    source = """\
+class Service:
+    def helper(self) -> None:
+        pass
+
+    def run(self) -> None:
+        helper()
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    calls = {(e.source, e.target, e.kind) for e in result.edges if e.kind == "calls"}
+    assert ("pkg/service.py::Service.run", "pkg/service.py::Service.helper", "calls") not in calls
+    unresolved = {(ref.source, ref.name, ref.kind) for ref in result.unresolved_refs}
+    assert ("pkg/service.py::Service.run", "helper", "calls") in unresolved
+
+
 def test_records_unresolved_attribute_call() -> None:
     source = """\
 def run(client):
