@@ -180,7 +180,7 @@ class CodeGraphStore:
         row = self._conn.execute(
             """
             SELECT * FROM nodes
-            WHERE kind IN ('function', 'method')
+            WHERE kind = 'function'
               AND name = ?
             ORDER BY length(qualified_name), file_path
             LIMIT 1
@@ -226,7 +226,7 @@ class CodeGraphStore:
             return []
         rows = self._conn.execute(
             """
-            SELECT nodes.*
+            SELECT DISTINCT nodes.*
             FROM edges
             JOIN nodes ON nodes.id = edges.source
             WHERE edges.target = ?

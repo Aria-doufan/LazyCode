@@ -127,6 +127,53 @@ def test_indexer_does_not_resolve_dotted_unresolved_calls_by_last_segment(
     assert store.get_callers("send") == []
 
 
+def test_indexer_does_not_resolve_bare_method_calls_to_sibling_methods(
+    tmp_path: Path,
+) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "service.py").write_text(
+        "class Service:\n"
+        "    def helper(self):\n"
+        "        pass\n\n"
+        "    def run(self):\n"
+        "        helper()\n",
+        encoding="utf-8",
+    )
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    indexer.index_all()
+    callers = store.get_callers("helper")
+
+    assert all(caller.qualified_name != "Service.run" for caller in callers)
+
+
+def test_get_callers_returns_unique_callers_for_repeated_calls(tmp_path: Path) -> None:
+    source = tmp_path / "pkg" / "service.py"
+    source.parent.mkdir()
+    source.write_text(
+        "def helper():\n"
+        "    pass\n\n"
+        "def run():\n"
+        "    helper()\n"
+        "    helper()\n\n"
+        "def other():\n"
+        "    helper()\n",
+        encoding="utf-8",
+    )
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    indexer.index_all()
+    callers = store.get_callers("helper")
+
+    assert [(n.name, n.file_path) for n in callers] == [
+        ("run", "pkg/service.py"),
+        ("other", "pkg/service.py"),
+    ]
+
+
 def test_indexer_preserves_cross_file_callers_when_only_target_changes(tmp_path: Path) -> None:
     pkg = tmp_path / "pkg"
     pkg.mkdir()
