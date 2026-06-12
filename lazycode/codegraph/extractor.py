@@ -247,11 +247,11 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         for scope in reversed(self.callable_scope_stack):
             if not scope.bare_call_visible:
                 continue
+            if call_name in scope.shadowed_names:
+                return None
             target_id = scope.symbols.get(call_name)
             if target_id is not None:
                 return target_id
-            if call_name in scope.shadowed_names:
-                return None
         return None
 
     def _unique_symbol_node_id(self, base_id: str, node: ast.AST) -> str:

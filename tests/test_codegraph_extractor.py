@@ -185,6 +185,32 @@ def run() -> None:
     assert ("pkg/service.py::run", "inner", "calls") in unresolved
 
 
+def test_nested_function_rebind_shadows_callable_resolution() -> None:
+    source = """\
+def shadowed() -> None:
+    def helper() -> None:
+        pass
+
+    helper = get_helper
+    helper()
+
+
+def unshadowed() -> None:
+    def helper() -> None:
+        pass
+
+    helper()
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    calls = {(e.source, e.target, e.kind) for e in result.edges if e.kind == "calls"}
+    assert ("pkg/service.py::shadowed", "pkg/service.py::shadowed.helper", "calls") not in calls
+    assert ("pkg/service.py::unshadowed", "pkg/service.py::unshadowed.helper", "calls") in calls
+    unresolved = {(ref.source, ref.name, ref.kind) for ref in result.unresolved_refs}
+    assert ("pkg/service.py::shadowed", "helper", "calls") in unresolved
+
+
 def test_definition_time_calls_do_not_create_body_call_edges() -> None:
     source = """\
 def helper() -> None:
