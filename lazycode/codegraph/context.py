@@ -6,6 +6,7 @@ from lazycode.codegraph.models import NodeRecord
 from lazycode.codegraph.store import CodeGraphStore
 
 MAX_SOURCE_CHARS = 6000
+_TRUNCATION_MARKER = "<truncated>"
 
 
 def render_node_source(
@@ -13,7 +14,13 @@ def render_node_source(
     node: NodeRecord,
     max_chars: int = MAX_SOURCE_CHARS,
 ) -> str:
-    source_path = project_root / node.file_path
+    project_root_path = project_root.resolve()
+    source_path = (project_root_path / node.file_path).resolve()
+    try:
+        source_path.relative_to(project_root_path)
+    except ValueError:
+        return f"Error: source path escapes project root: {node.file_path}"
+
     lines = source_path.read_text(encoding="utf-8").splitlines()
     start_line = max(node.start_line, 1)
     end_line = max(node.end_line, start_line)
@@ -23,9 +30,20 @@ def render_node_source(
         for line_no in range(start_line, min(end_line, len(lines)) + 1)
     ]
     output = "\n".join(rendered_lines)
+    return _truncate_source(output, max_chars)
+
+
+def _truncate_source(output: str, max_chars: int) -> str:
     if len(output) <= max_chars:
         return output
-    return f"{output[:max_chars]}\n<truncated>"
+    if max_chars <= 0:
+        return ""
+    if max_chars >= len(_TRUNCATION_MARKER) + 1:
+        suffix = f"\n{_TRUNCATION_MARKER}"
+        return f"{output[: max_chars - len(suffix)]}{suffix}"
+    if max_chars >= len(_TRUNCATION_MARKER):
+        return _TRUNCATION_MARKER
+    return output[:max_chars]
 
 
 def build_explore_context(
@@ -48,9 +66,14 @@ def build_explore_context(
 
     symbol_lines = ["## Symbols"]
     source_sections = ["## Source"]
+    rendered_ranges: set[tuple[str, int, int]] = set()
     for node in nodes:
         location = _format_node_location(node)
         symbol_lines.append(f"- {location}")
+        source_range = (node.file_path, node.start_line, node.end_line)
+        if source_range in rendered_ranges:
+            continue
+        rendered_ranges.add(source_range)
         source_sections.extend(
             [
                 f"### {location}",
