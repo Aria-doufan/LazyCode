@@ -56,7 +56,6 @@ class CodeGraphIndexer:
         return {"indexed": indexed, "skipped": skipped, "removed": 0}
 
     def resolve_references(self) -> int:
-        self.store.delete_resolved_call_edges()
         edges: list[EdgeRecord] = []
         for ref in self.store.get_unresolved_refs():
             target = self.store.find_callable_by_name(ref.name)
@@ -73,8 +72,7 @@ class CodeGraphIndexer:
                 )
             )
 
-        if edges:
-            self.store.insert_edges(edges)
+        self.store.replace_resolved_call_edges(edges)
         return len(edges)
 
     def _iter_python_files(self) -> list[Path]:

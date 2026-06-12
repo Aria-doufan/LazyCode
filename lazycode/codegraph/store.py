@@ -193,24 +193,18 @@ class CodeGraphStore:
 
     def insert_edges(self, edges: list[EdgeRecord]) -> None:
         with self._conn:
-            self._conn.executemany(
+            self._insert_edges(edges)
+
+    def replace_resolved_call_edges(self, edges: list[EdgeRecord]) -> None:
+        with self._conn:
+            self._conn.execute(
                 """
-                INSERT INTO edges (
-                    source, target, kind, line, col, metadata
-                ) VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    (
-                        edge.source,
-                        edge.target,
-                        edge.kind,
-                        edge.line,
-                        edge.col,
-                        json.dumps(dict(edge.metadata)),
-                    )
-                    for edge in edges
-                ],
+                DELETE FROM edges
+                WHERE kind = 'calls'
+                  AND metadata LIKE '%"generated_by": "resolve_references"%'
+                """
             )
+            self._insert_edges(edges)
 
     def delete_resolved_call_edges(self) -> None:
         with self._conn:
@@ -243,6 +237,26 @@ class CodeGraphStore:
             (target.id, limit),
         ).fetchall()
         return [self._node_from_row(row) for row in rows]
+
+    def _insert_edges(self, edges: list[EdgeRecord]) -> None:
+        self._conn.executemany(
+            """
+            INSERT INTO edges (
+                source, target, kind, line, col, metadata
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    edge.source,
+                    edge.target,
+                    edge.kind,
+                    edge.line,
+                    edge.col,
+                    json.dumps(dict(edge.metadata)),
+                )
+                for edge in edges
+            ],
+        )
 
     def _count(self, table: str) -> int:
         if table not in {"files", "nodes", "edges", "unresolved_refs"}:

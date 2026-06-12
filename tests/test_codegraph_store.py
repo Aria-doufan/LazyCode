@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -86,6 +87,122 @@ def test_store_replaces_file_graph(tmp_path: Path) -> None:
     assert store.get_file_hash("pkg/a.py") == "abc"
     assert store.get_nodes_by_file("pkg/a.py") == [node]
     assert store.search_nodes("hell") == [node]
+
+
+def test_replace_resolved_call_edges_rolls_back_on_insert_failure(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "codegraph.sqlite"
+    store = CodeGraphStore(db_path)
+    file_record = FileRecord(
+        path="pkg/a.py",
+        content_hash="abc",
+        language="python",
+        size=12,
+        indexed_at=1.0,
+        node_count=3,
+    )
+    caller = NodeRecord(
+        id="pkg/a.py::caller",
+        kind="function",
+        name="caller",
+        qualified_name="caller",
+        file_path="pkg/a.py",
+        language="python",
+        start_line=1,
+        end_line=3,
+        signature="def caller()",
+    )
+    old_target = NodeRecord(
+        id="pkg/a.py::old_target",
+        kind="function",
+        name="old_target",
+        qualified_name="old_target",
+        file_path="pkg/a.py",
+        language="python",
+        start_line=5,
+        end_line=6,
+        signature="def old_target()",
+    )
+    new_target = NodeRecord(
+        id="pkg/a.py::new_target",
+        kind="function",
+        name="new_target",
+        qualified_name="new_target",
+        file_path="pkg/a.py",
+        language="python",
+        start_line=8,
+        end_line=9,
+        signature="def new_target()",
+    )
+    generated_edge = EdgeRecord(
+        source=caller.id,
+        target=old_target.id,
+        kind="calls",
+        line=2,
+        col=4,
+        metadata={"name": "old_target", "generated_by": "resolve_references"},
+    )
+    direct_edge = EdgeRecord(
+        source=caller.id,
+        target=new_target.id,
+        kind="calls",
+        line=3,
+        col=4,
+        metadata={"name": "new_target"},
+    )
+
+    store.replace_file_graph(
+        file_record,
+        [caller, old_target, new_target],
+        [generated_edge, direct_edge],
+        [],
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        store.replace_resolved_call_edges(
+            [
+                EdgeRecord(
+                    source=caller.id,
+                    target="pkg/a.py::missing",
+                    kind="calls",
+                    line=4,
+                    col=4,
+                    metadata={"name": "missing", "generated_by": "resolve_references"},
+                )
+            ]
+        )
+
+    rows_after_failure = store._conn.execute(
+        "SELECT target FROM edges ORDER BY target"
+    ).fetchall()
+    assert [str(row["target"]) for row in rows_after_failure] == [
+        new_target.id,
+        old_target.id,
+    ]
+
+    store.replace_resolved_call_edges(
+        [
+            EdgeRecord(
+                source=caller.id,
+                target=new_target.id,
+                kind="calls",
+                line=4,
+                col=4,
+                metadata={"name": "new_target", "generated_by": "resolve_references"},
+            )
+        ]
+    )
+
+    rows_after_success = store._conn.execute(
+        "SELECT target, metadata FROM edges"
+    ).fetchall()
+    assert sorted(
+        (str(row["target"]), str(row["metadata"])) for row in rows_after_success
+    ) == [
+        (new_target.id, '{"name": "new_target", "generated_by": "resolve_references"}'),
+        (new_target.id, '{"name": "new_target"}'),
+    ]
 
 
 def test_search_nodes_treats_like_metacharacters_literally(tmp_path: Path) -> None:
