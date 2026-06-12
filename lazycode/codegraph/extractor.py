@@ -37,6 +37,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         self.result = result
         self.module_name = _module_name(file_path)
         self.scope_stack: list[tuple[str, str, bool]] = []
+        self._symbol_node_ids: set[str] = set()
         self._import_occurrence = 0
 
     def extract(self, tree: ast.Module) -> None:
@@ -82,7 +83,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         parent_id, parent_qualified, _ = self.scope_stack[-1]
         qualified = self._qualify(parent_qualified, node.name)
-        node_id = f"{self.file_path}::{qualified}"
+        node_id = self._unique_symbol_node_id(f"{self.file_path}::{qualified}", node)
         self.result.nodes.append(
             NodeRecord(
                 id=node_id,
@@ -110,7 +111,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
     def _add_function_node(self, node: ast.FunctionDef | ast.AsyncFunctionDef, *, is_async: bool) -> None:
         parent_id, parent_qualified, parent_is_class = self.scope_stack[-1]
         qualified = self._qualify(parent_qualified, node.name)
-        node_id = f"{self.file_path}::{qualified}"
+        node_id = self._unique_symbol_node_id(f"{self.file_path}::{qualified}", node)
         self.result.nodes.append(
             NodeRecord(
                 id=node_id,
@@ -128,6 +129,15 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         self.scope_stack.append((node_id, qualified, False))
         self.generic_visit(node)
         self.scope_stack.pop()
+
+    def _unique_symbol_node_id(self, base_id: str, node: ast.AST) -> str:
+        if base_id not in self._symbol_node_ids:
+            self._symbol_node_ids.add(base_id)
+            return base_id
+
+        duplicate_id = f"{base_id}@{getattr(node, 'lineno', 0)}:{getattr(node, 'col_offset', 0)}"
+        self._symbol_node_ids.add(duplicate_id)
+        return duplicate_id
 
     def _add_import_node(self, name: str, start_line: int, end_line: int, col: int) -> None:
         parent_id, _, _ = self.scope_stack[-1]

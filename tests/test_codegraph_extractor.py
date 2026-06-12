@@ -64,6 +64,59 @@ def outer() -> None:
     assert {node.qualified_name for node in import_nodes} == {"pkg.imports.tools"}
 
 
+def test_repeated_top_level_functions_have_unique_node_ids() -> None:
+    source = """\
+def configure():
+    return "first"
+
+
+def configure():
+    return "second"
+"""
+
+    result = extract_python_graph("pkg/settings.py", source)
+
+    assert len({node.id for node in result.nodes}) == len(result.nodes)
+    function_nodes = [
+        node
+        for node in result.nodes
+        if node.kind == "function" and node.qualified_name == "configure"
+    ]
+    assert len(function_nodes) == 2
+    assert [node.id for node in function_nodes] == [
+        "pkg/settings.py::configure",
+        "pkg/settings.py::configure@5:0",
+    ]
+
+
+def test_repeated_methods_have_unique_node_ids_and_contains_edges() -> None:
+    source = """\
+class Service:
+    def run(self):
+        return "first"
+
+    def run(self):
+        return "second"
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    assert len({node.id for node in result.nodes}) == len(result.nodes)
+    method_nodes = [
+        node
+        for node in result.nodes
+        if node.kind == "method" and node.qualified_name == "Service.run"
+    ]
+    assert len(method_nodes) == 2
+    assert [node.id for node in method_nodes] == [
+        "pkg/service.py::Service.run",
+        "pkg/service.py::Service.run@5:4",
+    ]
+
+    contains_targets = {edge.target for edge in result.edges if edge.kind == "contains"}
+    assert {node.id for node in method_nodes} <= contains_targets
+
+
 def test_function_signature_includes_defaults_varargs_kwonly_and_kwargs() -> None:
     source = """\
 def configure(path: str = "x", *items, enabled: bool = True, **opts) -> None:
