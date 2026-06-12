@@ -267,12 +267,28 @@ class _PythonGraphVisitor(ast.NodeVisitor):
                     names.update(self._collect_target_names(item.optional_vars))
         elif isinstance(statement, ast.ExceptHandler) and statement.name is not None:
             names.add(statement.name)
+        elif isinstance(statement, ast.match_case):
+            names.update(self._collect_pattern_binding_names(statement.pattern))
 
         for child in ast.iter_child_nodes(statement):
             if isinstance(child, ast.stmt | ast.ExceptHandler | ast.match_case):
                 names.update(self._collect_statement_binding_names(child))
             elif isinstance(child, ast.expr):
                 names.update(self._collect_expression_binding_names(child))
+        return names
+
+    def _collect_pattern_binding_names(self, pattern: ast.pattern) -> set[str]:
+        names: set[str] = set()
+        if isinstance(pattern, ast.MatchAs) and pattern.name is not None and pattern.name != "_":
+            names.add(pattern.name)
+        elif isinstance(pattern, ast.MatchStar) and pattern.name is not None and pattern.name != "_":
+            names.add(pattern.name)
+        elif isinstance(pattern, ast.MatchMapping) and pattern.rest is not None and pattern.rest != "_":
+            names.add(pattern.rest)
+
+        for child in ast.iter_child_nodes(pattern):
+            if isinstance(child, ast.pattern):
+                names.update(self._collect_pattern_binding_names(child))
         return names
 
     def _collect_expression_binding_names(self, expression: ast.expr) -> set[str]:
