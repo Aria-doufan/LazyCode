@@ -155,6 +155,85 @@ class CodeGraphStore:
         ).fetchall()
         return [self._node_from_row(row) for row in rows]
 
+    def get_unresolved_refs(self) -> list[UnresolvedReference]:
+        rows = self._conn.execute(
+            """
+            SELECT source, name, kind, line, col, file_path
+            FROM unresolved_refs
+            ORDER BY file_path, line
+            """,
+        ).fetchall()
+        return [
+            UnresolvedReference(
+                source=str(row["source"]),
+                name=str(row["name"]),
+                kind=row["kind"],
+                line=int(row["line"]),
+                col=int(row["col"]),
+                file_path=str(row["file_path"]),
+            )
+            for row in rows
+        ]
+
+    def find_callable_by_name(self, name: str) -> NodeRecord | None:
+        short_name = name.rsplit(".", 1)[-1]
+        row = self._conn.execute(
+            """
+            SELECT * FROM nodes
+            WHERE kind IN ('function', 'method')
+              AND name = ?
+            ORDER BY length(qualified_name), file_path
+            LIMIT 1
+            """,
+            (short_name,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._node_from_row(row)
+
+    def insert_edges(self, edges: list[EdgeRecord]) -> None:
+        with self._conn:
+            self._conn.executemany(
+                """
+                INSERT INTO edges (
+                    source, target, kind, line, col, metadata
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        edge.source,
+                        edge.target,
+                        edge.kind,
+                        edge.line,
+                        edge.col,
+                        json.dumps(dict(edge.metadata)),
+                    )
+                    for edge in edges
+                ],
+            )
+
+    def clear_unresolved_refs(self) -> None:
+        with self._conn:
+            self._conn.execute("DELETE FROM unresolved_refs")
+
+    def get_callers(self, symbol: str, limit: int = 20) -> list[NodeRecord]:
+        target = self.find_callable_by_name(symbol)
+        if target is None:
+            return []
+        rows = self._conn.execute(
+            """
+            SELECT nodes.*
+            FROM edges
+            JOIN nodes ON nodes.id = edges.source
+            WHERE edges.target = ?
+              AND edges.kind = 'calls'
+            ORDER BY nodes.file_path, nodes.start_line
+            LIMIT ?
+            """,
+            (target.id, limit),
+        ).fetchall()
+        return [self._node_from_row(row) for row in rows]
+
     def _count(self, table: str) -> int:
         if table not in {"files", "nodes", "edges", "unresolved_refs"}:
             raise ValueError(f"Unknown table: {table}")

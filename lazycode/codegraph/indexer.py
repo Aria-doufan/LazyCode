@@ -7,7 +7,7 @@ import tokenize
 from pathlib import Path
 
 from lazycode.codegraph.extractor import extract_python_graph
-from lazycode.codegraph.models import FileRecord
+from lazycode.codegraph.models import EdgeRecord, FileRecord
 from lazycode.codegraph.store import CodeGraphStore
 
 SKIP_DIRS = {".git", ".lazycode", ".venv", "node_modules", "__pycache__", ".pytest_cache"}
@@ -52,7 +52,30 @@ class CodeGraphIndexer:
             )
             indexed += 1
 
+        self.resolve_references()
         return {"indexed": indexed, "skipped": skipped, "removed": 0}
+
+    def resolve_references(self) -> int:
+        edges: list[EdgeRecord] = []
+        for ref in self.store.get_unresolved_refs():
+            target = self.store.find_callable_by_name(ref.name)
+            if target is None:
+                continue
+            edges.append(
+                EdgeRecord(
+                    source=ref.source,
+                    target=target.id,
+                    kind=ref.kind,
+                    line=ref.line,
+                    col=ref.col,
+                    metadata={"name": ref.name},
+                )
+            )
+
+        if edges:
+            self.store.insert_edges(edges)
+        self.store.clear_unresolved_refs()
+        return len(edges)
 
     def _iter_python_files(self) -> list[Path]:
         files: list[Path] = []

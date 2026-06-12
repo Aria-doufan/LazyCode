@@ -90,3 +90,20 @@ def test_indexer_does_not_index_skipped_directory_subtrees(tmp_path: Path) -> No
     assert result == {"indexed": 1, "skipped": 0, "removed": 0}
     assert store.search_nodes("visible_in_index")[0].file_path == "pkg/visible.py"
     assert store.search_nodes("hidden_from_index") == []
+
+
+def test_indexer_resolves_cross_file_function_calls(tmp_path: Path) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "helpers.py").write_text("def helper():\n    pass\n", encoding="utf-8")
+    (pkg / "service.py").write_text(
+        "from pkg.helpers import helper\n\ndef run():\n    helper()\n",
+        encoding="utf-8",
+    )
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    indexer.index_all()
+    callers = store.get_callers("helper")
+
+    assert [(n.name, n.file_path) for n in callers] == [("run", "pkg/service.py")]
