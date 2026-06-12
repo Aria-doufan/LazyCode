@@ -37,7 +37,8 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         self.result = result
         self.module_name = _module_name(file_path)
         self.scope_stack: list[tuple[str, str, bool, bool]] = []
-        self.local_callables: dict[str, str] = {}
+        self.callable_scope_stack: list[dict[str, str]] = []
+        self._precollected_node_ids: dict[int, str] = {}
         self._symbol_node_ids: set[str] = set()
         self._import_occurrence = 0
 
@@ -58,7 +59,9 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             )
         )
         self.scope_stack.append((module_id, "", False, False))
+        self.callable_scope_stack.append(self._collect_callable_symbols(tree.body, ""))
         self.visit(tree)
+        self.callable_scope_stack.pop()
         self.scope_stack.pop()
 
     def visit_Import(self, node: ast.Import) -> None:
@@ -100,7 +103,9 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         )
         self._add_contains_edge(parent_id, node_id, node)
         self.scope_stack.append((node_id, qualified, True, False))
+        self.callable_scope_stack.append(self._collect_callable_symbols(node.body, qualified))
         self.generic_visit(node)
+        self.callable_scope_stack.pop()
         self.scope_stack.pop()
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
@@ -112,8 +117,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
     def _add_function_node(self, node: ast.FunctionDef | ast.AsyncFunctionDef, *, is_async: bool) -> None:
         parent_id, parent_qualified, parent_is_class, _ = self.scope_stack[-1]
         qualified = self._qualify(parent_qualified, node.name)
-        node_id = self._unique_symbol_node_id(f"{self.file_path}::{qualified}", node)
-        self.local_callables[node.name] = node_id
+        node_id = self._node_id_for(node, qualified)
         self.result.nodes.append(
             NodeRecord(
                 id=node_id,
@@ -129,14 +133,16 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         )
         self._add_contains_edge(parent_id, node_id, node)
         self.scope_stack.append((node_id, qualified, False, True))
+        self.callable_scope_stack.append(self._collect_callable_symbols(node.body, qualified))
         self.generic_visit(node)
+        self.callable_scope_stack.pop()
         self.scope_stack.pop()
 
     def visit_Call(self, node: ast.Call) -> None:
         current_id, _, _, in_callable = self.scope_stack[-1]
         if in_callable:
             call_name = self._call_name(node.func)
-            target_id = self.local_callables.get(call_name)
+            target_id = self._resolve_callable(call_name)
             if target_id is not None:
                 self.result.edges.append(
                     EdgeRecord(
@@ -160,6 +166,29 @@ class _PythonGraphVisitor(ast.NodeVisitor):
                     )
                 )
         self.generic_visit(node)
+
+    def _collect_callable_symbols(self, body: list[ast.stmt], parent_qualified: str) -> dict[str, str]:
+        symbols: dict[str, str] = {}
+        for statement in body:
+            if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
+                qualified = self._qualify(parent_qualified, statement.name)
+                node_id = self._unique_symbol_node_id(f"{self.file_path}::{qualified}", statement)
+                self._precollected_node_ids[id(statement)] = node_id
+                symbols[statement.name] = node_id
+        return symbols
+
+    def _node_id_for(self, node: ast.FunctionDef | ast.AsyncFunctionDef, qualified: str) -> str:
+        precollected_id = self._precollected_node_ids.get(id(node))
+        if precollected_id is not None:
+            return precollected_id
+        return self._unique_symbol_node_id(f"{self.file_path}::{qualified}", node)
+
+    def _resolve_callable(self, call_name: str) -> str | None:
+        for symbols in reversed(self.callable_scope_stack):
+            target_id = symbols.get(call_name)
+            if target_id is not None:
+                return target_id
+        return None
 
     def _unique_symbol_node_id(self, base_id: str, node: ast.AST) -> str:
         if base_id not in self._symbol_node_ids:

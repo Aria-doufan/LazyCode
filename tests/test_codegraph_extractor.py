@@ -149,6 +149,42 @@ def run() -> None:
     assert ("pkg/service.py::run", "pkg/service.py::helper", "calls") in calls
 
 
+def test_resolves_forward_local_function_call() -> None:
+    source = """\
+def run() -> None:
+    helper()
+
+
+def helper() -> None:
+    pass
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    calls = {(e.source, e.target, e.kind) for e in result.edges if e.kind == "calls"}
+    assert ("pkg/service.py::run", "pkg/service.py::helper", "calls") in calls
+    assert not [ref for ref in result.unresolved_refs if ref.source == "pkg/service.py::run" and ref.name == "helper"]
+
+
+def test_nested_function_does_not_leak_to_unrelated_function() -> None:
+    source = """\
+def outer() -> None:
+    def inner() -> None:
+        pass
+
+
+def run() -> None:
+    inner()
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    calls = {(e.source, e.target, e.kind) for e in result.edges if e.kind == "calls"}
+    assert ("pkg/service.py::run", "pkg/service.py::outer.inner", "calls") not in calls
+    unresolved = {(ref.source, ref.name, ref.kind) for ref in result.unresolved_refs}
+    assert ("pkg/service.py::run", "inner", "calls") in unresolved
+
+
 def test_records_unresolved_attribute_call() -> None:
     source = """\
 def run(client):
