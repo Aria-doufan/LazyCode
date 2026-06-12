@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from types import MappingProxyType
+from typing import Literal, Mapping
 
 NodeKind = Literal[
     "module",
@@ -48,7 +49,10 @@ class EdgeRecord:
     kind: EdgeKind
     line: int = 0
     col: int = 0
-    metadata: dict[str, str] = field(default_factory=dict)
+    metadata: Mapping[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
 
 
 @dataclass(frozen=True)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from lazycode.codegraph.models import EdgeRecord, NodeRecord
 
 
@@ -39,3 +41,6 @@ def test_edge_record_tracks_location_and_kind() -> None:
     assert edge.line == 14
     assert edge.col == 8
     assert edge.metadata == {"name": "callee"}
+
+    with pytest.raises(TypeError):
+        edge.metadata["name"] = "other"
