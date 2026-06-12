@@ -117,3 +117,15 @@ async def test_codegraph_callers_tool_lists_callers(tmp_path: Path) -> None:
 
     assert not result.is_error
     assert "pkg/service.py:4-5 function run" in result.output
+
+
+from lazycode.tools import create_default_registry
+
+
+def test_default_registry_includes_deferred_codegraph_tools() -> None:
+    registry = create_default_registry()
+
+    assert "CodeGraphIndex" in registry.get_deferred_tool_names()
+    assert "CodeGraphExplore" in registry.get_deferred_tool_names()
+    assert "CodeGraphNode" in registry.get_deferred_tool_names()
+    assert "CodeGraphCallers" in registry.get_deferred_tool_names()
