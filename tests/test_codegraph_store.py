@@ -36,4 +36,6 @@ def test_edge_record_tracks_location_and_kind() -> None:
     assert edge.source == "caller"
     assert edge.target == "callee"
     assert edge.kind == "calls"
+    assert edge.line == 14
+    assert edge.col == 8
     assert edge.metadata == {"name": "callee"}
