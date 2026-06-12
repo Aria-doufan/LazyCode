@@ -395,6 +395,90 @@ def run(flag) -> None:
     ]
 
 
+def test_class_definition_shadows_same_named_function_for_later_call() -> None:
+    source = """\
+def helper() -> None:
+    pass
+
+
+class helper:
+    pass
+
+
+def run() -> None:
+    helper()
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    calls = {(e.source, e.target, e.kind) for e in result.edges if e.kind == "calls"}
+    assert ("pkg/service.py::run", "pkg/service.py::helper", "calls") not in calls
+    unresolved = {(ref.source, ref.name, ref.kind) for ref in result.unresolved_refs}
+    assert ("pkg/service.py::run", "helper", "calls") in unresolved
+
+
+def test_module_assignment_shadows_same_named_function_for_later_function_body_call() -> None:
+    source = """\
+def helper() -> None:
+    pass
+
+
+helper = factory()
+
+
+def run() -> None:
+    helper()
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    calls = {(e.source, e.target, e.kind) for e in result.edges if e.kind == "calls"}
+    assert ("pkg/service.py::run", "pkg/service.py::helper", "calls") not in calls
+    unresolved = {(ref.source, ref.name, ref.kind) for ref in result.unresolved_refs}
+    assert ("pkg/service.py::run", "helper", "calls") in unresolved
+
+
+def test_local_function_defined_inside_match_case_resolves_later_bare_call() -> None:
+    source = """\
+def run(value) -> None:
+    match value:
+        case 1:
+            def helper() -> None:
+                pass
+    helper()
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    calls = {(e.source, e.target, e.kind) for e in result.edges if e.kind == "calls"}
+    assert ("pkg/service.py::run", "pkg/service.py::run.helper", "calls") in calls
+    assert not [
+        ref
+        for ref in result.unresolved_refs
+        if ref.source == "pkg/service.py::run" and ref.name == "helper"
+    ]
+
+
+def test_nested_walrus_assignment_shadows_later_call() -> None:
+    source = """\
+def helper() -> None:
+    pass
+
+
+def run() -> None:
+    if (helper := get_helper()):
+        pass
+    helper()
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    calls = {(e.source, e.target, e.kind) for e in result.edges if e.kind == "calls"}
+    assert ("pkg/service.py::run", "pkg/service.py::helper", "calls") not in calls
+    unresolved = {(ref.source, ref.name, ref.kind) for ref in result.unresolved_refs}
+    assert ("pkg/service.py::run", "helper", "calls") in unresolved
+
+
 def test_records_unresolved_attribute_call() -> None:
     source = """\
 def run(client):
