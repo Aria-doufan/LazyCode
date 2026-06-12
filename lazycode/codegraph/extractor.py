@@ -220,11 +220,19 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         return names
 
     def _collect_statement_binding_names(self, statement: ast.stmt) -> set[str]:
+        if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            return set()
+
+        names: set[str] = set()
         if isinstance(statement, ast.Assign):
-            return self._collect_target_names(*statement.targets)
-        if isinstance(statement, ast.AnnAssign | ast.AugAssign):
-            return self._collect_target_names(statement.target)
-        return set()
+            names.update(self._collect_target_names(*statement.targets))
+        elif isinstance(statement, ast.AnnAssign | ast.AugAssign):
+            names.update(self._collect_target_names(statement.target))
+
+        for child in ast.iter_child_nodes(statement):
+            if isinstance(child, ast.stmt):
+                names.update(self._collect_statement_binding_names(child))
+        return names
 
     def _collect_target_names(self, *targets: ast.expr) -> set[str]:
         names: set[str] = set()
