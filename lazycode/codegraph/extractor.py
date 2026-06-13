@@ -282,7 +282,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             unsafe_bindings[name] = True
         for name in self._collect_direct_module_import_names(statement):
             final_bindings[name] = None
-            unsafe_bindings[name] = isinstance(statement, ast.Import)
+            unsafe_bindings[name] = True
 
         for child in ast.iter_child_nodes(statement):
             if isinstance(child, ast.stmt | ast.ExceptHandler | ast.match_case):
