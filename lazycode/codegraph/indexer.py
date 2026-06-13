@@ -126,8 +126,10 @@ class CodeGraphIndexer:
     def _iter_python_files(self) -> list[Path]:
         files: list[Path] = []
         for root, dirs, filenames in os.walk(self.project_root):
-            dirs[:] = sorted(dirname for dirname in dirs if dirname not in SKIP_DIRS)
             root_path = Path(root)
+            dirs[:] = sorted(
+                dirname for dirname in dirs if self._is_indexable_dir(root_path / dirname)
+            )
             for filename in sorted(filenames):
                 if not filename.endswith(".py"):
                     continue
@@ -138,6 +140,18 @@ class CodeGraphIndexer:
                     continue
                 files.append(path)
         return files
+
+    def _is_indexable_dir(self, path: Path) -> bool:
+        if path.name in SKIP_DIRS or path.is_symlink():
+            return False
+
+        try:
+            resolved = path.resolve()
+            resolved.relative_to(self.project_root)
+        except (OSError, ValueError):
+            return False
+
+        return os.path.normcase(str(resolved)) == os.path.normcase(str(path.absolute()))
 
     def _read_python_source(self, path: Path) -> str:
         with tokenize.open(path) as source_file:

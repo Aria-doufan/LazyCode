@@ -117,6 +117,29 @@ def test_indexer_skips_symlinked_python_files_that_escape_project_root(tmp_path:
     assert store.search_nodes("hidden_secret") == []
 
 
+def test_indexer_prunes_symlinked_directory_that_escapes_project_root(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "hidden.py").write_text("def hidden_from_linked_dir():\n    pass\n", encoding="utf-8")
+    project = tmp_path / "project"
+    project.mkdir()
+    link = project / "linked"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlink creation unavailable: {exc}")
+    visible = project / "visible.py"
+    visible.write_text("def visible_symbol():\n    pass\n", encoding="utf-8")
+    store = CodeGraphStore(project / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(project, store)
+
+    result = indexer.index_all()
+
+    assert result == {"indexed": 1, "skipped": 0, "removed": 0}
+    assert store.search_nodes("visible_symbol")[0].file_path == "visible.py"
+    assert store.search_nodes("hidden_from_linked_dir") == []
+
+
 def test_indexer_does_not_index_skipped_directory_subtrees(tmp_path: Path) -> None:
     skipped = tmp_path / ".venv" / "pkg" / "hidden.py"
     skipped.parent.mkdir(parents=True)
