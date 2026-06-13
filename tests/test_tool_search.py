@@ -193,6 +193,26 @@ async def test_tool_search_select_multiple():
     assert reg.is_discovered("DeferredAlpha")
     assert reg.is_discovered("DeferredBeta")
 
+@pytest.mark.asyncio
+async def test_tool_search_select_disabled_deferred_tool_not_loaded():
+    """select: should not discover or load disabled deferred tools."""
+    reg = _make_registry()
+    reg.disable("DeferredAlpha")
+    search = ToolSearchTool(reg, protocol="anthropic")
+    reg.register(search)
+
+    from lazycode.tools.impl.tool_search import ToolSearchParams
+
+    params = ToolSearchParams(query="select:DeferredAlpha")
+    result = await search.execute(params)
+
+    assert not result.is_error
+    assert "No matching deferred tools" in result.output
+    assert "Available:" in result.output
+    assert "DeferredBeta" in result.output
+    assert "Found 1 tool(s)" not in result.output
+    assert not reg.is_discovered("DeferredAlpha")
+
 # ---------------------------------------------------------------------------
 # Deferred loading: token savings & end-to-end discovery
 # ---------------------------------------------------------------------------
