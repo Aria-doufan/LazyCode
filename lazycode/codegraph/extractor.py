@@ -401,7 +401,12 @@ class _PythonGraphVisitor(ast.NodeVisitor):
     def _absolute_import_module(self, statement: ast.ImportFrom) -> str:
         if statement.level == 0:
             return statement.module or ""
-        package_parts = self.module_name.split(".")[:-1]
+        module_parts = self.module_name.split(".") if self.module_name else []
+        path = PurePosixPath(self.file_path.replace("\\", "/"))
+        if path.stem == "__init__":
+            package_parts = module_parts
+        else:
+            package_parts = module_parts[:-1]
         if statement.level > 1:
             package_parts = package_parts[: -(statement.level - 1)]
         if statement.module:
