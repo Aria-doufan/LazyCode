@@ -604,12 +604,28 @@ class _PythonGraphVisitor(ast.NodeVisitor):
     def _resolve_import_binding(self, call_name: str) -> tuple[str, str]:
         if "." in call_name:
             return "", ""
-        for scope in reversed(self.callable_scope_stack):
-            binding = scope.import_bindings.get(call_name)
-            if binding is not None:
-                return binding
-            if call_name in scope.shadowed_names or call_name in scope.symbols:
+        if not self.callable_scope_stack:
+            return "", ""
+
+        current_scope = self.callable_scope_stack[-1]
+        binding = current_scope.import_bindings.get(call_name)
+        if binding is not None:
+            return binding
+        if call_name in current_scope.shadowed_names or call_name in current_scope.symbols:
+            return "", ""
+
+        module_scope = self.callable_scope_stack[0]
+        for enclosing_scope in self.callable_scope_stack[1:-1]:
+            if (
+                call_name in enclosing_scope.import_bindings
+                or call_name in enclosing_scope.shadowed_names
+                or call_name in enclosing_scope.symbols
+            ):
                 return "", ""
+
+        binding = module_scope.import_bindings.get(call_name)
+        if binding is not None:
+            return binding
         return "", ""
 
     def _is_resolvable_unresolved_reference(self, call_name: str) -> bool:
