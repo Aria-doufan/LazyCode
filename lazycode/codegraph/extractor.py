@@ -139,6 +139,90 @@ class _PythonGraphVisitor(ast.NodeVisitor):
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         self._add_function_node(node, is_async=True)
 
+    def visit_If(self, node: ast.If) -> None:
+        self.visit(node.test)
+        self._visit_statement_sequence(node.body)
+        self._visit_statement_sequence(node.orelse)
+
+    def visit_For(self, node: ast.For) -> None:
+        self.visit(node.iter)
+        self.visit(node.target)
+        self._clear_local_import_bindings_for_names(self._collect_target_names(node.target))
+        self._visit_statement_sequence(node.body)
+        self._visit_statement_sequence(node.orelse)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+        self.visit(node.iter)
+        self.visit(node.target)
+        self._clear_local_import_bindings_for_names(self._collect_target_names(node.target))
+        self._visit_statement_sequence(node.body)
+        self._visit_statement_sequence(node.orelse)
+
+    def visit_While(self, node: ast.While) -> None:
+        self.visit(node.test)
+        self._visit_statement_sequence(node.body)
+        self._visit_statement_sequence(node.orelse)
+
+    def visit_With(self, node: ast.With) -> None:
+        self._visit_with(node)
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+        self._visit_with(node)
+
+    def visit_Try(self, node: ast.Try) -> None:
+        self._visit_statement_sequence(node.body)
+        for handler in node.handlers:
+            self.visit(handler)
+        self._visit_statement_sequence(node.orelse)
+        self._visit_statement_sequence(node.finalbody)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        if node.type is not None:
+            self.visit(node.type)
+        if node.name is not None:
+            self._clear_local_import_bindings_for_names({node.name})
+        self._visit_statement_sequence(node.body)
+
+    def visit_Match(self, node: ast.Match) -> None:
+        self.visit(node.subject)
+        for case in node.cases:
+            self.visit(case)
+
+    def visit_match_case(self, node: ast.match_case) -> None:
+        self._clear_local_import_bindings_for_names(
+            self._collect_pattern_binding_names(node.pattern)
+        )
+        if node.guard is not None:
+            self.visit(node.guard)
+        self._visit_statement_sequence(node.body)
+
+    def _visit_with(self, node: ast.With | ast.AsyncWith) -> None:
+        bound_names: set[str] = set()
+        for item in node.items:
+            self.visit(item.context_expr)
+            if item.optional_vars is not None:
+                self.visit(item.optional_vars)
+                bound_names.update(self._collect_target_names(item.optional_vars))
+        self._clear_local_import_bindings_for_names(bound_names)
+        self._visit_statement_sequence(node.body)
+
+    def _visit_statement_sequence(self, body: list[ast.stmt]) -> None:
+        for statement in body:
+            if self._in_callable_scope():
+                self._apply_local_from_import_bindings_before_visit(statement)
+            self.visit(statement)
+            if self._in_callable_scope():
+                self._clear_local_import_bindings_after_visit(statement)
+
+    def _in_callable_scope(self) -> bool:
+        return bool(self.scope_stack and self.scope_stack[-1][3])
+
+    def _clear_local_import_bindings_for_names(self, names: set[str]) -> None:
+        if not self._in_callable_scope():
+            return
+        for name in names:
+            self.callable_scope_stack[-1].import_bindings.pop(name, None)
+
     def _add_function_node(self, node: ast.FunctionDef | ast.AsyncFunctionDef, *, is_async: bool) -> None:
         parent_id, parent_qualified, parent_is_class, _ = self.scope_stack[-1]
         qualified = self._qualify(parent_qualified, node.name)
