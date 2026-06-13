@@ -141,8 +141,8 @@ class _PythonGraphVisitor(ast.NodeVisitor):
 
     def visit_If(self, node: ast.If) -> None:
         self.visit(node.test)
-        self._visit_statement_sequence(node.body)
-        self._visit_statement_sequence(node.orelse)
+        self._visit_isolated_statement_sequence(node.body)
+        self._visit_isolated_statement_sequence(node.orelse)
 
     def visit_For(self, node: ast.For) -> None:
         self.visit(node.iter)
@@ -170,11 +170,11 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         self._visit_with(node)
 
     def visit_Try(self, node: ast.Try) -> None:
-        self._visit_statement_sequence(node.body)
+        self._visit_isolated_statement_sequence(node.body)
         for handler in node.handlers:
-            self.visit(handler)
-        self._visit_statement_sequence(node.orelse)
-        self._visit_statement_sequence(node.finalbody)
+            self._visit_isolated_node(handler)
+        self._visit_isolated_statement_sequence(node.orelse)
+        self._visit_isolated_statement_sequence(node.finalbody)
 
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
         if node.type is not None:
@@ -186,7 +186,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
     def visit_Match(self, node: ast.Match) -> None:
         self.visit(node.subject)
         for case in node.cases:
-            self.visit(case)
+            self._visit_isolated_node(case)
 
     def visit_match_case(self, node: ast.match_case) -> None:
         self._clear_local_import_bindings_for_names(
@@ -213,6 +213,28 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             self.visit(statement)
             if self._in_callable_scope():
                 self._clear_local_import_bindings_after_visit(statement)
+
+    def _visit_isolated_statement_sequence(self, body: list[ast.stmt]) -> None:
+        if not self._in_callable_scope():
+            self._visit_statement_sequence(body)
+            return
+        scope = self.callable_scope_stack[-1]
+        import_bindings = dict(scope.import_bindings)
+        try:
+            self._visit_statement_sequence(body)
+        finally:
+            scope.import_bindings = import_bindings
+
+    def _visit_isolated_node(self, node: ast.AST) -> None:
+        if not self._in_callable_scope():
+            self.visit(node)
+            return
+        scope = self.callable_scope_stack[-1]
+        import_bindings = dict(scope.import_bindings)
+        try:
+            self.visit(node)
+        finally:
+            scope.import_bindings = import_bindings
 
     def _in_callable_scope(self) -> bool:
         return bool(self.scope_stack and self.scope_stack[-1][3])

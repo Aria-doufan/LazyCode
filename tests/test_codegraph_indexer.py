@@ -268,6 +268,29 @@ def test_indexer_resolves_call_after_local_from_import(tmp_path: Path) -> None:
     assert [(n.name, n.file_path) for n in callers] == [("run", "pkg/service.py")]
 
 
+def test_indexer_does_not_resolve_local_from_import_from_sibling_if_branch(
+    tmp_path: Path,
+) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "helpers.py").write_text("def helper():\n    pass\n", encoding="utf-8")
+    (pkg / "service.py").write_text(
+        "def run(flag):\n"
+        "    if flag:\n"
+        "        from pkg.helpers import helper\n"
+        "    else:\n"
+        "        helper()\n",
+        encoding="utf-8",
+    )
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    indexer.index_all()
+    callers = store.get_callers("helper")
+
+    assert all(caller.name != "run" for caller in callers)
+
+
 def test_indexer_does_not_resolve_enclosing_local_from_import_in_nested_function(
     tmp_path: Path,
 ) -> None:
