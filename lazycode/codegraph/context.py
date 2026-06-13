@@ -60,11 +60,7 @@ def build_explore_context(
     query: str,
     max_nodes: int = 8,
 ) -> str:
-    nodes = store.search_nodes(query, limit=max_nodes)
-    if not nodes:
-        dotted_query = ".".join(query.split())
-        if dotted_query != query:
-            nodes = store.search_nodes(dotted_query, limit=max_nodes)
+    nodes = _rank_nodes(store.all_nodes(), query)[:max_nodes]
     title = f"# CodeGraph Explore: {query}"
     if not nodes:
         return (
@@ -92,6 +88,37 @@ def build_explore_context(
         )
 
     return "\n".join([title, "", *symbol_lines, "", *source_sections])
+
+
+def _rank_nodes(nodes: list[NodeRecord], query: str) -> list[NodeRecord]:
+    terms = [
+        term.lower()
+        for term in query.replace("_", " ").replace(".", " ").split()
+        if term
+    ]
+    ranked_nodes: list[tuple[int, int, str, int, NodeRecord]] = []
+    for node in nodes:
+        haystack = " ".join(
+            [
+                node.name,
+                node.qualified_name,
+                node.file_path,
+                node.signature,
+            ]
+        ).lower()
+        score = sum(1 for term in terms if term in haystack)
+        if score == 0:
+            continue
+        kind_bonus = 2 if node.kind in {"function", "method", "class"} else 0
+        ranked_nodes.append((score, kind_bonus, node.file_path, node.start_line, node))
+
+    return [
+        node
+        for _, _, _, _, node in sorted(
+            ranked_nodes,
+            key=lambda item: (-item[0], -item[1], item[2], item[3]),
+        )
+    ]
 
 
 def _format_node_location(node: NodeRecord) -> str:

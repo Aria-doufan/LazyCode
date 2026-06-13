@@ -160,6 +160,15 @@ class CodeGraphStore:
         ).fetchall()
         return [self._node_from_row(row) for row in rows]
 
+    def all_nodes(self) -> list[NodeRecord]:
+        rows = self._conn.execute(
+            """
+            SELECT * FROM nodes
+            ORDER BY file_path, start_line
+            """
+        ).fetchall()
+        return [self._node_from_row(row) for row in rows]
+
     def delete_files(self, paths: list[str]) -> int:
         removed = 0
         with self._conn:

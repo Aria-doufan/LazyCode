@@ -130,9 +130,49 @@ def test_build_explore_context_deduplicates_duplicate_source_ranges(
     ]
 
     class FakeStore:
-        def search_nodes(self, query: str, limit: int) -> list[NodeRecord]:
+        def all_nodes(self) -> list[NodeRecord]:
             return nodes
 
     output = build_explore_context(tmp_path, FakeStore(), "duplicate", max_nodes=4)
 
     assert output.count("1\tdef duplicate():") == 1
+
+
+def test_explore_prefers_nodes_matching_multiple_query_terms(tmp_path: Path) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "auth.py").write_text(
+        "class AuthService:\n"
+        "    def login(self):\n"
+        "        return True\n",
+        encoding="utf-8",
+    )
+    (pkg / "misc.py").write_text("def login():\n    return True\n", encoding="utf-8")
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    CodeGraphIndexer(tmp_path, store).index_all()
+
+    output = build_explore_context(tmp_path, store, "AuthService login", max_nodes=1)
+
+    assert "pkg/auth.py:2-3 method AuthService.login" in output
+    assert "pkg/misc.py" not in output
+
+
+def test_explore_ranks_separate_query_terms_instead_of_whole_phrase(
+    tmp_path: Path,
+) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "auth.py").write_text(
+        "class AuthService:\n"
+        "    def login(self):\n"
+        "        return True\n",
+        encoding="utf-8",
+    )
+    (pkg / "misc.py").write_text("def login():\n    return True\n", encoding="utf-8")
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    CodeGraphIndexer(tmp_path, store).index_all()
+
+    output = build_explore_context(tmp_path, store, "auth login", max_nodes=1)
+
+    assert "pkg/auth.py:2-3 method AuthService.login" in output
+    assert "pkg/misc.py" not in output
