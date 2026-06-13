@@ -209,6 +209,47 @@ def test_indexer_resolves_local_from_import_function_calls(tmp_path: Path) -> No
     assert [(n.name, n.file_path) for n in callers] == [("run", "pkg/service.py")]
 
 
+def test_indexer_resolves_src_layout_local_from_import_function_calls(
+    tmp_path: Path,
+) -> None:
+    pkg = tmp_path / "src" / "pkg"
+    pkg.mkdir(parents=True)
+    (pkg / "helpers.py").write_text("def helper():\n    pass\n", encoding="utf-8")
+    (pkg / "service.py").write_text(
+        "from pkg.helpers import helper\n\ndef run():\n    helper()\n",
+        encoding="utf-8",
+    )
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    indexer.index_all()
+    callers = store.get_callers("helper")
+
+    assert [(n.name, n.file_path) for n in callers] == [("run", "src/pkg/service.py")]
+
+
+def test_indexer_does_not_resolve_ambiguous_src_layout_suffix_matches(
+    tmp_path: Path,
+) -> None:
+    first_pkg = tmp_path / "src" / "pkg"
+    second_pkg = tmp_path / "vendor" / "pkg"
+    first_pkg.mkdir(parents=True)
+    second_pkg.mkdir(parents=True)
+    (first_pkg / "helpers.py").write_text("def helper():\n    pass\n", encoding="utf-8")
+    (first_pkg / "service.py").write_text(
+        "from pkg.helpers import helper\n\ndef run():\n    helper()\n",
+        encoding="utf-8",
+    )
+    (second_pkg / "helpers.py").write_text("def helper():\n    pass\n", encoding="utf-8")
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    indexer.index_all()
+    callers = store.get_callers("helper")
+
+    assert all(caller.name != "run" for caller in callers)
+
+
 def test_indexer_resolves_package_init_relative_from_import_function_calls(
     tmp_path: Path,
 ) -> None:

@@ -166,6 +166,28 @@ def helper() -> None:
     assert not [ref for ref in result.unresolved_refs if ref.source == "pkg/service.py::run" and ref.name == "helper"]
 
 
+def test_conditional_module_function_does_not_resolve_as_guaranteed_binding() -> None:
+    source = """\
+if flag:
+    def helper() -> None:
+        pass
+
+
+def run() -> None:
+    helper()
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    calls = {(e.source, e.target, e.kind) for e in result.edges if e.kind == "calls"}
+    assert ("pkg/service.py::run", "pkg/service.py::helper", "calls") not in calls
+    assert not [
+        ref
+        for ref in result.unresolved_refs
+        if ref.source == "pkg/service.py::run" and ref.name == "helper" and ref.is_resolvable
+    ]
+
+
 def test_nested_function_does_not_leak_to_unrelated_function() -> None:
     source = """\
 def outer() -> None:

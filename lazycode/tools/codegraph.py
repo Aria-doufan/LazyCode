@@ -28,7 +28,7 @@ class CodeGraphNodeParams(BaseModel):
 
 class CodeGraphCallersParams(BaseModel):
     symbol: str = Field(description="Function symbol to find callers for")
-    limit: int = Field(default=20, description="Maximum number of callers to return")
+    limit: int = Field(default=20, ge=1, le=100, description="Maximum number of callers to return")
     project_path: str = Field(default="", description="Project root containing the CodeGraph index")
 
 

@@ -308,3 +308,55 @@ def test_search_nodes_treats_like_metacharacters_literally(tmp_path: Path) -> No
 
     assert store.search_nodes("a_b") == [literal_underscore]
     assert store.search_nodes("a%b") == [literal_percent]
+
+
+def test_get_callers_clamps_unbounded_limits(tmp_path: Path) -> None:
+    store = CodeGraphStore(tmp_path / "codegraph.sqlite")
+    file_record = FileRecord(
+        path="pkg/service.py",
+        content_hash="abc",
+        language="python",
+        size=12,
+        indexed_at=1.0,
+        node_count=3,
+    )
+    target = NodeRecord(
+        id="pkg/service.py::helper",
+        kind="function",
+        name="helper",
+        qualified_name="helper",
+        file_path="pkg/service.py",
+        language="python",
+        start_line=1,
+        end_line=2,
+        signature="def helper()",
+    )
+    callers = [
+        NodeRecord(
+            id=f"pkg/service.py::caller_{index}",
+            kind="function",
+            name=f"caller_{index}",
+            qualified_name=f"caller_{index}",
+            file_path="pkg/service.py",
+            language="python",
+            start_line=index + 3,
+            end_line=index + 3,
+            signature=f"def caller_{index}()",
+        )
+        for index in range(2)
+    ]
+    edges = [
+        EdgeRecord(
+            source=caller.id,
+            target=target.id,
+            kind="calls",
+            line=caller.start_line,
+            col=4,
+            metadata={"name": "helper"},
+        )
+        for caller in callers
+    ]
+    store.replace_file_graph(file_record, [target, *callers], edges, [])
+
+    assert len(store.get_callers("helper", limit=-1)) == 1
+    assert len(store.get_callers("helper", limit=10_000)) == 2

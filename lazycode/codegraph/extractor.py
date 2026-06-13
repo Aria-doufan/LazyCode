@@ -424,11 +424,15 @@ class _PythonGraphVisitor(ast.NodeVisitor):
     ) -> bool:
         has_star_import = False
         if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
-            qualified = self._qualify("", statement.name)
-            node_id = self._unique_symbol_node_id(f"{self.file_path}::{qualified}", statement)
-            self._precollected_node_ids[id(statement)] = node_id
-            final_bindings[statement.name] = node_id
-            unsafe_bindings[statement.name] = False
+            if allow_import_binding:
+                qualified = self._qualify("", statement.name)
+                node_id = self._unique_symbol_node_id(f"{self.file_path}::{qualified}", statement)
+                self._precollected_node_ids[id(statement)] = node_id
+                final_bindings[statement.name] = node_id
+                unsafe_bindings[statement.name] = False
+            else:
+                final_bindings[statement.name] = None
+                unsafe_bindings[statement.name] = True
             import_bindings.pop(statement.name, None)
             return has_star_import
         if isinstance(statement, ast.ClassDef):

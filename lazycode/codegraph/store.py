@@ -243,17 +243,30 @@ class CodeGraphStore:
         self, module: str, name: str
     ) -> NodeRecord | None:
         module_path = module.replace(".", "/")
+        module_file = f"{module_path}.py"
+        package_init = f"{module_path}/__init__.py"
         rows = self._conn.execute(
             """
             SELECT * FROM nodes
             WHERE kind = 'function'
               AND name = ?
               AND qualified_name = ?
-              AND file_path IN (?, ?)
+              AND (
+                  file_path IN (?, ?)
+                  OR file_path LIKE ?
+                  OR file_path LIKE ?
+              )
             ORDER BY file_path
             LIMIT 2
             """,
-            (name, name, f"{module_path}.py", f"{module_path}/__init__.py"),
+            (
+                name,
+                name,
+                module_file,
+                package_init,
+                f"%/{module_file}",
+                f"%/{package_init}",
+            ),
         ).fetchall()
         if len(rows) != 1:
             return None
@@ -289,6 +302,7 @@ class CodeGraphStore:
             self._conn.execute("DELETE FROM unresolved_refs")
 
     def get_callers(self, symbol: str, limit: int = 20) -> list[NodeRecord]:
+        limit = max(1, min(int(limit), 100))
         if "." in symbol or "::" in symbol:
             target_filter = "target.qualified_name = ? OR target.id = ?"
             params: tuple[str, ...] = (symbol, symbol)

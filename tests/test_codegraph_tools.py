@@ -209,6 +209,15 @@ async def test_codegraph_callers_tool_lists_callers(tmp_path: Path) -> None:
     assert "pkg/service.py:4-5 function run" in result.output
 
 
+def test_codegraph_callers_tool_rejects_unbounded_limits() -> None:
+    params_model = CodeGraphCallersTool().params_model
+
+    with pytest.raises(ValueError):
+        params_model(symbol="helper", limit=-1)
+    with pytest.raises(ValueError):
+        params_model(symbol="helper", limit=101)
+
+
 from lazycode.tools import create_default_registry
 
 
