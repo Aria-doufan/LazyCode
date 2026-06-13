@@ -399,6 +399,22 @@ class Agent:
         """清理active skill。"""
         self.active_skills.clear()
 
+    def _add_deferred_tool_reminder_once(self, conversation: ConversationManager) -> None:
+        """Add deferred tool discovery reminder once per conversation."""
+        deferred_names = self.registry.get_deferred_tool_names()
+        if not deferred_names:
+            return
+        reminder = (
+            "The following deferred tools are available via ToolSearch. "
+            "Their schemas are NOT loaded - use ToolSearch with "
+            'query "select:<name>[,<name>...]" to load tool schemas before calling them:\n'
+            + "\n".join(deferred_names)
+        )
+        wrapped = f"<system-reminder>\n{reminder}\n</system-reminder>"
+        if any(message.content == wrapped for message in conversation.history):
+            return
+        conversation.add_system_reminder(reminder)
+
     def set_skill_catalog(self, catalog: str) -> None:
         """设置skill catalog。"""
         self._skill_catalog = catalog
@@ -532,14 +548,7 @@ class Agent:
                         f"Hook [{note.hook_id}] {note.event}: {note.output}"
                     )
 
-            deferred_names = self.registry.get_deferred_tool_names()
-            if deferred_names:
-                conversation.add_system_reminder(
-                    "The following deferred tools are available via ToolSearch. "
-                    "Their schemas are NOT loaded - use ToolSearch with "
-                    'query "select:<name>[,<name>...]" to load tool schemas before calling them:\n'
-                    + "\n".join(deferred_names)
-                )
+            self._add_deferred_tool_reminder_once(conversation)
 
             tools = self.registry.get_all_schemas(self.protocol)
 
@@ -1050,14 +1059,7 @@ class Agent:
             if isinstance(compact_result, CompactEvent):
                 conversation.inject_environment(env_context)
 
-            deferred_names = self.registry.get_deferred_tool_names()
-            if deferred_names:
-                conversation.add_system_reminder(
-                    "The following deferred tools are available via ToolSearch. "
-                    "Their schemas are NOT loaded - use ToolSearch with "
-                    'query "select:<name>[,<name>...]" to load tool schemas before calling them:\n'
-                    + "\n".join(deferred_names)
-                )
+            self._add_deferred_tool_reminder_once(conversation)
 
             api_conv, _new_records = apply_tool_result_budget(
                 conversation, self.session_dir, self.replacement_state
