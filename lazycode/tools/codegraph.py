@@ -5,7 +5,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from lazycode.codegraph.context import build_explore_context, render_node_source
-from lazycode.codegraph.indexer import CodeGraphIndexer, default_db_path
+from lazycode.codegraph.indexer import CodeGraphIndexer, default_db_path, stale_index_paths
 from lazycode.codegraph.models import NodeRecord
 from lazycode.codegraph.store import CodeGraphStore
 from lazycode.tools.base import Tool, ToolResult
@@ -84,14 +84,13 @@ class CodeGraphExploreTool(Tool):
                 return ToolResult(output=_NO_INDEX_MESSAGE)
 
             store = CodeGraphStore(default_db_path(project_root))
-            return ToolResult(
-                output=build_explore_context(
-                    project_root,
-                    store,
-                    params.query,
-                    max_nodes=params.max_nodes,
-                )
+            output = build_explore_context(
+                project_root,
+                store,
+                params.query,
+                max_nodes=params.max_nodes,
             )
+            return ToolResult(output=_with_stale_warning(project_root, store, output))
         except ValueError as exc:
             return ToolResult(output=f"Error: {exc}", is_error=True)
         except Exception as exc:
@@ -122,8 +121,10 @@ class CodeGraphNodeTool(Tool):
             store = CodeGraphStore(default_db_path(project_root))
             nodes = store.search_nodes(params.symbol, limit=5)
             if not nodes:
-                return ToolResult(output=f"No indexed symbols matched: {params.symbol}")
-            return ToolResult(output=_render_nodes(project_root, nodes))
+                output = f"No indexed symbols matched: {params.symbol}"
+            else:
+                output = _render_nodes(project_root, nodes)
+            return ToolResult(output=_with_stale_warning(project_root, store, output))
         except ValueError as exc:
             return ToolResult(output=f"Error: {exc}", is_error=True)
         except Exception as exc:
@@ -154,10 +155,12 @@ class CodeGraphCallersTool(Tool):
             store = CodeGraphStore(default_db_path(project_root))
             callers = store.get_callers(params.symbol, limit=params.limit)
             if not callers:
-                return ToolResult(output=f"No callers found for {params.symbol}.")
-            lines = [f"Callers of {params.symbol}:"]
-            lines.extend(f"- {_format_node_location(node)}" for node in callers)
-            return ToolResult(output="\n".join(lines))
+                output = f"No callers found for {params.symbol}."
+            else:
+                lines = [f"Callers of {params.symbol}:"]
+                lines.extend(f"- {_format_node_location(node)}" for node in callers)
+                output = "\n".join(lines)
+            return ToolResult(output=_with_stale_warning(project_root, store, output))
         except ValueError as exc:
             return ToolResult(output=f"Error: {exc}", is_error=True)
         except Exception as exc:
@@ -190,6 +193,20 @@ def _project_root(default_root: Path, requested: str) -> Path:
     if not root.is_dir():
         raise ValueError(f"project path is not a directory: {root}")
     return root
+
+
+def _with_stale_warning(project_root: Path, store: CodeGraphStore, output: str) -> str:
+    stale_paths = stale_index_paths(project_root, store)
+    if not stale_paths:
+        return output
+
+    warning_lines = [
+        "Index may be stale for these files; run CodeGraphIndex before relying on source slices:",
+        *(f"- {path}" for path in stale_paths[:5]),
+        "",
+        output,
+    ]
+    return "\n".join(warning_lines)
 
 
 def _render_nodes(project_root: Path, nodes: list[NodeRecord]) -> str:

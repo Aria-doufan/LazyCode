@@ -41,6 +41,26 @@ class CodeGraphStore:
             return None
         return str(row["content_hash"])
 
+    def get_files(self) -> list[FileRecord]:
+        rows = self._conn.execute(
+            """
+            SELECT path, content_hash, language, size, indexed_at, node_count
+            FROM files
+            ORDER BY path
+            """
+        ).fetchall()
+        return [
+            FileRecord(
+                path=str(row["path"]),
+                content_hash=str(row["content_hash"]),
+                language=str(row["language"]),
+                size=int(row["size"]),
+                indexed_at=float(row["indexed_at"]),
+                node_count=int(row["node_count"]),
+            )
+            for row in rows
+        ]
+
     def replace_file_graph(
         self,
         file_record: FileRecord,

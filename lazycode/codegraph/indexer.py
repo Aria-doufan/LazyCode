@@ -17,6 +17,33 @@ def default_db_path(project_root: Path) -> Path:
     return project_root / ".lazycode" / "codegraph.sqlite"
 
 
+def stale_index_paths(project_root: Path, store: CodeGraphStore) -> list[str]:
+    root = project_root.resolve()
+    stale_paths: list[str] = []
+    for record in store.get_files():
+        record_path = Path(record.path)
+        if record_path.is_absolute() or ".." in record_path.parts:
+            stale_paths.append(record.path)
+            continue
+
+        path = (root / record_path).resolve()
+        try:
+            path.relative_to(root)
+        except ValueError:
+            stale_paths.append(record.path)
+            continue
+
+        if not path.exists():
+            stale_paths.append(record.path)
+            continue
+
+        content_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+        if content_hash != record.content_hash:
+            stale_paths.append(record.path)
+
+    return stale_paths
+
+
 class CodeGraphIndexer:
     def __init__(self, project_root: Path, store: CodeGraphStore) -> None:
         self.project_root = project_root.resolve()

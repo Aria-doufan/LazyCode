@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import time
 
 import pytest
 
@@ -80,6 +81,23 @@ async def test_codegraph_explore_tool_requires_existing_index(tmp_path: Path) ->
 
     assert not result.is_error
     assert "No CodeGraph index found" in result.output
+
+
+@pytest.mark.asyncio
+async def test_explore_warns_when_indexed_file_changed(tmp_path: Path) -> None:
+    source = tmp_path / "pkg" / "service.py"
+    source.parent.mkdir()
+    source.write_text("def run():\n    return 'old'\n", encoding="utf-8")
+    await CodeGraphIndexTool(default_project_root=tmp_path).execute(CodeGraphIndexParams(project_path=""))
+    time.sleep(0.01)
+    source.write_text("def run():\n    return 'new'\n", encoding="utf-8")
+    tool = CodeGraphExploreTool(default_project_root=tmp_path)
+
+    result = await tool.execute(tool.params_model(query="run"))
+
+    assert not result.is_error
+    assert "Index may be stale" in result.output
+    assert "pkg/service.py" in result.output
 
 
 @pytest.mark.asyncio
