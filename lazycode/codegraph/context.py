@@ -60,6 +60,7 @@ def build_explore_context(
     query: str,
     max_nodes: int = 8,
 ) -> str:
+    max_nodes = max(0, max_nodes)
     nodes = _rank_nodes(store.all_nodes(), query)[:max_nodes]
     title = f"# CodeGraph Explore: {query}"
     if not nodes:

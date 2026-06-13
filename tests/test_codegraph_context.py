@@ -59,6 +59,19 @@ def test_build_explore_context_includes_symbols_and_source(tmp_path: Path) -> No
     assert "def run(self)" in output
 
 
+def test_build_explore_context_negative_max_nodes_returns_no_matches(
+    tmp_path: Path,
+) -> None:
+    store = _index_project(tmp_path)
+
+    output = build_explore_context(tmp_path, store, "Service run", max_nodes=-1)
+
+    assert "# CodeGraph Explore: Service run" in output
+    assert "No indexed symbols matched." in output
+    assert "pkg/service.py" not in output
+    assert "def run(self)" not in output
+
+
 def test_render_node_source_rejects_paths_escaping_project_root(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     project_root.mkdir()
