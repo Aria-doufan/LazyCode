@@ -163,11 +163,12 @@ class _PythonGraphVisitor(ast.NodeVisitor):
                 self._collect_callable_symbols(node.body, qualified),
                 True,
                 self._collect_local_shadowed_names(node),
-                import_bindings=self._collect_local_from_import_bindings(node.body),
             )
         )
         for statement in node.body:
+            self._apply_local_from_import_bindings_before_visit(statement)
             self.visit(statement)
+            self._clear_local_import_bindings_after_visit(statement)
         self.callable_scope_stack.pop()
         self.scope_stack.pop()
 
@@ -381,15 +382,21 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             if alias.name != "*"
         }
 
-    def _collect_local_from_import_bindings(
-        self, body: list[ast.stmt]
-    ) -> dict[str, tuple[str, str]]:
-        import_bindings: dict[str, tuple[str, str]] = {}
-        for statement in body:
-            for name in self._collect_direct_statement_binding_names(statement):
-                import_bindings.pop(name, None)
-            import_bindings.update(self._collect_direct_from_import_bindings(statement))
-        return import_bindings
+    def _apply_local_from_import_bindings_before_visit(self, statement: ast.stmt) -> None:
+        if not isinstance(statement, ast.ImportFrom):
+            return
+        self.callable_scope_stack[-1].import_bindings.update(
+            self._collect_direct_from_import_bindings(statement)
+        )
+
+    def _clear_local_import_bindings_after_visit(self, statement: ast.stmt) -> None:
+        if isinstance(statement, ast.ImportFrom):
+            return
+        bound_names = self._collect_direct_statement_binding_names(statement)
+        if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            bound_names.add(statement.name)
+        for name in bound_names:
+            self.callable_scope_stack[-1].import_bindings.pop(name, None)
 
     def _absolute_import_module(self, statement: ast.ImportFrom) -> str:
         if statement.level == 0:

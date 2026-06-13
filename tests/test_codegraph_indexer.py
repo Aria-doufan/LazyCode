@@ -191,6 +191,44 @@ def test_indexer_resolves_local_from_import_function_calls(tmp_path: Path) -> No
     assert [(n.name, n.file_path) for n in callers] == [("run", "pkg/service.py")]
 
 
+def test_indexer_does_not_resolve_call_before_local_from_import(tmp_path: Path) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "helpers.py").write_text("def helper():\n    pass\n", encoding="utf-8")
+    (pkg / "service.py").write_text(
+        "def run():\n"
+        "    helper()\n"
+        "    from pkg.helpers import helper\n",
+        encoding="utf-8",
+    )
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    indexer.index_all()
+    callers = store.get_callers("helper")
+
+    assert all(caller.name != "run" for caller in callers)
+
+
+def test_indexer_resolves_call_after_local_from_import(tmp_path: Path) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "helpers.py").write_text("def helper():\n    pass\n", encoding="utf-8")
+    (pkg / "service.py").write_text(
+        "def run():\n"
+        "    from pkg.helpers import helper\n"
+        "    helper()\n",
+        encoding="utf-8",
+    )
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    indexer.index_all()
+    callers = store.get_callers("helper")
+
+    assert [(n.name, n.file_path) for n in callers] == [("run", "pkg/service.py")]
+
+
 def test_indexer_does_not_resolve_from_import_to_unrelated_project_function(
     tmp_path: Path,
 ) -> None:
