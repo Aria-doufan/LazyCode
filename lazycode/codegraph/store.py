@@ -289,20 +289,25 @@ class CodeGraphStore:
             self._conn.execute("DELETE FROM unresolved_refs")
 
     def get_callers(self, symbol: str, limit: int = 20) -> list[NodeRecord]:
-        target = self.find_callable_by_name(symbol)
-        if target is None:
-            return []
+        if "." in symbol or "::" in symbol:
+            target_filter = "target.qualified_name = ? OR target.id = ?"
+            params: tuple[str, ...] = (symbol, symbol)
+        else:
+            target_filter = "target.name = ? AND target.qualified_name = ?"
+            params = (symbol, symbol)
         rows = self._conn.execute(
-            """
-            SELECT DISTINCT nodes.*
+            f"""
+            SELECT DISTINCT caller.*
             FROM edges
-            JOIN nodes ON nodes.id = edges.source
-            WHERE edges.target = ?
-              AND edges.kind = 'calls'
-            ORDER BY nodes.file_path, nodes.start_line
+            JOIN nodes AS caller ON caller.id = edges.source
+            JOIN nodes AS target ON target.id = edges.target
+            WHERE edges.kind = 'calls'
+              AND target.kind = 'function'
+              AND ({target_filter})
+            ORDER BY caller.file_path, caller.start_line
             LIMIT ?
             """,
-            (target.id, limit),
+            (*params, limit),
         ).fetchall()
         return [self._node_from_row(row) for row in rows]
 

@@ -428,6 +428,26 @@ def test_indexer_does_not_resolve_from_import_to_unrelated_project_function(
     assert callers == []
 
 
+def test_indexer_reports_import_resolved_callers_for_ambiguous_short_name(
+    tmp_path: Path,
+) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "a.py").write_text("def helper():\n    pass\n", encoding="utf-8")
+    (pkg / "b.py").write_text("def helper():\n    pass\n", encoding="utf-8")
+    (pkg / "service.py").write_text(
+        "from pkg.a import helper\n\ndef run():\n    helper()\n",
+        encoding="utf-8",
+    )
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    indexer.index_all()
+    callers = store.get_callers("helper")
+
+    assert [(n.name, n.file_path) for n in callers] == [("run", "pkg/service.py")]
+
+
 def test_indexer_does_not_resolve_ambiguous_top_level_function_calls(
     tmp_path: Path,
 ) -> None:
