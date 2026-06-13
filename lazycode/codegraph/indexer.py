@@ -14,7 +14,16 @@ SKIP_DIRS = {".git", ".lazycode", ".venv", "node_modules", "__pycache__", ".pyte
 
 
 def default_db_path(project_root: Path) -> Path:
-    return project_root / ".lazycode" / "codegraph.sqlite"
+    root = project_root.resolve()
+    db_dir = root / ".lazycode"
+    try:
+        resolved_db_dir = db_dir.resolve(strict=False)
+        resolved_db_dir.relative_to(root)
+    except OSError as exc:
+        raise ValueError(f"resolving CodeGraph database path failed: {exc}") from exc
+    except ValueError as exc:
+        raise ValueError("CodeGraph database path must remain inside project root") from exc
+    return db_dir / "codegraph.sqlite"
 
 
 def stale_index_paths(project_root: Path, store: CodeGraphStore) -> list[str]:
@@ -120,8 +129,14 @@ class CodeGraphIndexer:
             dirs[:] = sorted(dirname for dirname in dirs if dirname not in SKIP_DIRS)
             root_path = Path(root)
             for filename in sorted(filenames):
-                if filename.endswith(".py"):
-                    files.append(root_path / filename)
+                if not filename.endswith(".py"):
+                    continue
+                path = root_path / filename
+                try:
+                    path.resolve().relative_to(self.project_root)
+                except (OSError, ValueError):
+                    continue
+                files.append(path)
         return files
 
     def _read_python_source(self, path: Path) -> str:

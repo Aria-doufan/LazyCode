@@ -52,6 +52,28 @@ async def test_codegraph_index_tool_rejects_paths_outside_default_root(
 
 
 @pytest.mark.asyncio
+async def test_codegraph_index_tool_rejects_symlinked_lazycode_directory(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    try:
+        (project / ".lazycode").symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+    (project / "service.py").write_text("def run():\n    pass\n", encoding="utf-8")
+
+    tool = CodeGraphIndexTool(default_project_root=project)
+    result = await tool.execute(CodeGraphIndexParams(project_path=""))
+
+    assert result.is_error
+    assert "database path must remain inside project root" in result.output
+    assert not (outside / "codegraph.sqlite").exists()
+
+
+@pytest.mark.asyncio
 async def test_codegraph_explore_tool_returns_error_when_store_construction_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

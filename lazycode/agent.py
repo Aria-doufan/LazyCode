@@ -801,6 +801,12 @@ class Agent:
             return tc.arguments.get("file_path", tc.tool_name)
         return str(tc.arguments)
 
+    def _prepare_tool_for_execution(self, tool: Any) -> None:
+        """Refresh tools that need the active agent workspace before execution."""
+        setter = getattr(tool, "set_default_project_root", None)
+        if callable(setter):
+            setter(self.work_dir)
+
     async def _execute_single_tool_direct(
         self, tc: ToolCallComplete
     ) -> _ToolExecResult:
@@ -827,6 +833,7 @@ class Agent:
             )
 
         try:
+            self._prepare_tool_for_execution(tool)
             params = tool.params_model.model_validate(tc.arguments)
             result = await tool.execute(params)
         except ValidationError as e:
@@ -919,6 +926,7 @@ class Agent:
                     self.permission_checker.rule_engine.append_local_rule(rule)
 
         try:
+            self._prepare_tool_for_execution(tool)
             params = tool.params_model.model_validate(tc.arguments)
             result = await tool.execute(params)
         except ValidationError as e:
@@ -1169,6 +1177,7 @@ class Agent:
                     )
 
         try:
+            self._prepare_tool_for_execution(tool)
             params = tool.params_model.model_validate(tc.arguments)
             result = await tool.execute(params)
         except ValidationError as e:

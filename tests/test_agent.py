@@ -28,6 +28,7 @@ from lazycode.tools.base import (
     TextDelta,
     ToolCallComplete,
 )
+from lazycode.tools.codegraph import CodeGraphIndexTool
 
 # ---------------------------------------------------------------------------
 # 返回脚本化响应的 Mock LLM 客户端
@@ -81,6 +82,31 @@ def _collect(events: list) -> dict[str, list]:
 # ---------------------------------------------------------------------------
 # 测试
 # ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_agent_refreshes_codegraph_root_from_active_work_dir(tmp_path):
+    """CodeGraph tools created before a work_dir switch use the active agent workspace."""
+    original = tmp_path / "original"
+    original.mkdir()
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    (original / "old.py").write_text("def old_symbol():\n    pass\n", encoding="utf-8")
+    (worktree / "new.py").write_text("def new_symbol():\n    pass\n", encoding="utf-8")
+    client = MockLLMClient([])
+    registry = create_default_registry()
+    tool = registry.get("CodeGraphIndex")
+    assert isinstance(tool, CodeGraphIndexTool)
+    tool.set_default_project_root(original)
+    agent = Agent(client, registry, "anthropic", work_dir=str(worktree))
+
+    result = await agent._execute_tool_noninteractive(
+        ToolCallComplete("t1", "CodeGraphIndex", {"project_path": ""})
+    )
+
+    assert not result.is_error
+    assert (worktree / ".lazycode" / "codegraph.sqlite").exists()
+    assert not (original / ".lazycode" / "codegraph.sqlite").exists()
+
 
 @pytest.mark.asyncio
 async def test_single_step_tool_call():

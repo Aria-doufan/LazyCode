@@ -42,6 +42,9 @@ class CodeGraphIndexTool(Tool):
     def __init__(self, default_project_root: Path | str | None = None) -> None:
         self.default_project_root = Path(default_project_root) if default_project_root else Path.cwd()
 
+    def set_default_project_root(self, default_project_root: Path | str) -> None:
+        self.default_project_root = Path(default_project_root)
+
     async def execute(self, params: CodeGraphIndexParams) -> ToolResult:
         store: CodeGraphStore | None = None
         try:
@@ -75,6 +78,9 @@ class CodeGraphExploreTool(Tool):
 
     def __init__(self, default_project_root: Path | str | None = None) -> None:
         self.default_project_root = Path(default_project_root) if default_project_root else Path.cwd()
+
+    def set_default_project_root(self, default_project_root: Path | str) -> None:
+        self.default_project_root = Path(default_project_root)
 
     async def execute(self, params: CodeGraphExploreParams) -> ToolResult:
         store: CodeGraphStore | None = None
@@ -111,6 +117,9 @@ class CodeGraphNodeTool(Tool):
     def __init__(self, default_project_root: Path | str | None = None) -> None:
         self.default_project_root = Path(default_project_root) if default_project_root else Path.cwd()
 
+    def set_default_project_root(self, default_project_root: Path | str) -> None:
+        self.default_project_root = Path(default_project_root)
+
     async def execute(self, params: CodeGraphNodeParams) -> ToolResult:
         store: CodeGraphStore | None = None
         try:
@@ -144,6 +153,9 @@ class CodeGraphCallersTool(Tool):
 
     def __init__(self, default_project_root: Path | str | None = None) -> None:
         self.default_project_root = Path(default_project_root) if default_project_root else Path.cwd()
+
+    def set_default_project_root(self, default_project_root: Path | str) -> None:
+        self.default_project_root = Path(default_project_root)
 
     async def execute(self, params: CodeGraphCallersParams) -> ToolResult:
         store: CodeGraphStore | None = None

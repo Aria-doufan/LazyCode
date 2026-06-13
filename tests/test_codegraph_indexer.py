@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+import pytest
+
 from lazycode.codegraph.indexer import CodeGraphIndexer, default_db_path
 from lazycode.codegraph.store import CodeGraphStore
 
@@ -89,6 +91,30 @@ def test_indexer_stores_hash_of_raw_file_bytes(tmp_path: Path) -> None:
     assert result == {"indexed": 1, "skipped": 0, "removed": 0}
     assert second_hash != first_hash
     assert store.get_file_hash("pkg/service.py") == second_hash
+
+
+def test_indexer_skips_symlinked_python_files_that_escape_project_root(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    secret = outside / "secret.py"
+    secret.write_text("def hidden_secret():\n    pass\n", encoding="utf-8")
+    project = tmp_path / "project"
+    project.mkdir()
+    link = project / "link.py"
+    try:
+        link.symlink_to(secret)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+    visible = project / "visible.py"
+    visible.write_text("def visible_symbol():\n    pass\n", encoding="utf-8")
+    store = CodeGraphStore(project / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(project, store)
+
+    result = indexer.index_all()
+
+    assert result == {"indexed": 1, "skipped": 0, "removed": 0}
+    assert store.search_nodes("visible_symbol")[0].file_path == "visible.py"
+    assert store.search_nodes("hidden_secret") == []
 
 
 def test_indexer_does_not_index_skipped_directory_subtrees(tmp_path: Path) -> None:
