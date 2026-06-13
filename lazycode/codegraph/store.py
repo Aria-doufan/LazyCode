@@ -243,30 +243,23 @@ class CodeGraphStore:
         self, module: str, name: str
     ) -> NodeRecord | None:
         module_path = module.replace(".", "/")
-        module_file = f"{module_path}.py"
-        package_init = f"{module_path}/__init__.py"
+        candidates = (
+            f"{module_path}.py",
+            f"{module_path}/__init__.py",
+            f"src/{module_path}.py",
+            f"src/{module_path}/__init__.py",
+        )
         rows = self._conn.execute(
             """
             SELECT * FROM nodes
             WHERE kind = 'function'
               AND name = ?
               AND qualified_name = ?
-              AND (
-                  file_path IN (?, ?)
-                  OR file_path LIKE ?
-                  OR file_path LIKE ?
-              )
+              AND file_path IN (?, ?, ?, ?)
             ORDER BY file_path
             LIMIT 2
             """,
-            (
-                name,
-                name,
-                module_file,
-                package_init,
-                f"%/{module_file}",
-                f"%/{package_init}",
-            ),
+            (name, name, *candidates),
         ).fetchall()
         if len(rows) != 1:
             return None

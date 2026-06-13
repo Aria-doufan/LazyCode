@@ -228,19 +228,43 @@ def test_indexer_resolves_src_layout_local_from_import_function_calls(
     assert [(n.name, n.file_path) for n in callers] == [("run", "src/pkg/service.py")]
 
 
-def test_indexer_does_not_resolve_ambiguous_src_layout_suffix_matches(
+def test_indexer_does_not_resolve_fixture_suffix_from_import_function_calls(
     tmp_path: Path,
 ) -> None:
-    first_pkg = tmp_path / "src" / "pkg"
-    second_pkg = tmp_path / "vendor" / "pkg"
-    first_pkg.mkdir(parents=True)
-    second_pkg.mkdir(parents=True)
-    (first_pkg / "helpers.py").write_text("def helper():\n    pass\n", encoding="utf-8")
-    (first_pkg / "service.py").write_text(
+    app = tmp_path / "app"
+    fixture_pkg = tmp_path / "tests" / "fixtures" / "pkg"
+    app.mkdir()
+    fixture_pkg.mkdir(parents=True)
+    (app / "main.py").write_text(
+        "from pkg.service import helper\n\ndef run():\n    helper()\n",
+        encoding="utf-8",
+    )
+    (fixture_pkg / "service.py").write_text(
+        "def helper():\n    pass\n",
+        encoding="utf-8",
+    )
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    indexer.index_all()
+    callers = store.get_callers("helper")
+
+    assert all(caller.name != "run" for caller in callers)
+
+
+def test_indexer_does_not_resolve_ambiguous_root_and_src_from_import_function_calls(
+    tmp_path: Path,
+) -> None:
+    root_pkg = tmp_path / "pkg"
+    src_pkg = tmp_path / "src" / "pkg"
+    root_pkg.mkdir()
+    src_pkg.mkdir(parents=True)
+    (root_pkg / "helpers.py").write_text("def helper():\n    pass\n", encoding="utf-8")
+    (src_pkg / "helpers.py").write_text("def helper():\n    pass\n", encoding="utf-8")
+    (src_pkg / "service.py").write_text(
         "from pkg.helpers import helper\n\ndef run():\n    helper()\n",
         encoding="utf-8",
     )
-    (second_pkg / "helpers.py").write_text("def helper():\n    pass\n", encoding="utf-8")
     store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
     indexer = CodeGraphIndexer(tmp_path, store)
 
