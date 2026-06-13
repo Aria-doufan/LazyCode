@@ -139,6 +139,23 @@ async def test_explore_warns_when_indexed_file_deleted(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_explore_warns_when_new_indexable_file_added(tmp_path: Path) -> None:
+    existing = tmp_path / "pkg" / "existing.py"
+    existing.parent.mkdir()
+    existing.write_text("", encoding="utf-8")
+    await CodeGraphIndexTool(default_project_root=tmp_path).execute(CodeGraphIndexParams(project_path=""))
+    new_source = tmp_path / "pkg" / "new.py"
+    new_source.write_text("def new_symbol():\n    pass\n", encoding="utf-8")
+    tool = CodeGraphExploreTool(default_project_root=tmp_path)
+
+    result = await tool.execute(tool.params_model(query="new_symbol"))
+
+    assert not result.is_error
+    assert "Index may be stale" in result.output
+    assert "pkg/new.py" in result.output
+
+
+@pytest.mark.asyncio
 async def test_node_warns_when_indexed_file_replaced_by_directory(tmp_path: Path) -> None:
     source = tmp_path / "pkg" / "service.py"
     source.parent.mkdir()

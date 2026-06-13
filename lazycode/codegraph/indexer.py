@@ -29,7 +29,9 @@ def default_db_path(project_root: Path) -> Path:
 def stale_index_paths(project_root: Path, store: CodeGraphStore) -> list[str]:
     root = project_root.resolve()
     stale_paths: list[str] = []
+    indexed_paths: set[str] = set()
     for record in store.get_files():
+        indexed_paths.add(record.path)
         record_path = Path(record.path)
         if record_path.is_absolute() or ".." in record_path.parts:
             stale_paths.append(record.path)
@@ -54,7 +56,45 @@ def stale_index_paths(project_root: Path, store: CodeGraphStore) -> list[str]:
         if content_hash != record.content_hash:
             stale_paths.append(record.path)
 
+    current_paths = {
+        path.relative_to(root).as_posix() for path in _iter_indexable_python_files(root)
+    }
+    stale_paths.extend(sorted(current_paths - indexed_paths))
     return stale_paths
+
+
+def _iter_indexable_python_files(project_root: Path) -> list[Path]:
+    files: list[Path] = []
+    for root, dirs, filenames in os.walk(project_root):
+        root_path = Path(root)
+        dirs[:] = sorted(
+            dirname
+            for dirname in dirs
+            if _is_indexable_dir(root_path / dirname, project_root)
+        )
+        for filename in sorted(filenames):
+            if not filename.endswith(".py"):
+                continue
+            path = root_path / filename
+            try:
+                path.resolve().relative_to(project_root)
+            except (OSError, ValueError):
+                continue
+            files.append(path)
+    return files
+
+
+def _is_indexable_dir(path: Path, project_root: Path) -> bool:
+    if path.name in SKIP_DIRS or path.is_symlink():
+        return False
+
+    try:
+        resolved = path.resolve()
+        resolved.relative_to(project_root)
+    except (OSError, ValueError):
+        return False
+
+    return os.path.normcase(str(resolved)) == os.path.normcase(str(path.absolute()))
 
 
 class CodeGraphIndexer:
@@ -128,34 +168,7 @@ class CodeGraphIndexer:
         return len(edges)
 
     def _iter_python_files(self) -> list[Path]:
-        files: list[Path] = []
-        for root, dirs, filenames in os.walk(self.project_root):
-            root_path = Path(root)
-            dirs[:] = sorted(
-                dirname for dirname in dirs if self._is_indexable_dir(root_path / dirname)
-            )
-            for filename in sorted(filenames):
-                if not filename.endswith(".py"):
-                    continue
-                path = root_path / filename
-                try:
-                    path.resolve().relative_to(self.project_root)
-                except (OSError, ValueError):
-                    continue
-                files.append(path)
-        return files
-
-    def _is_indexable_dir(self, path: Path) -> bool:
-        if path.name in SKIP_DIRS or path.is_symlink():
-            return False
-
-        try:
-            resolved = path.resolve()
-            resolved.relative_to(self.project_root)
-        except (OSError, ValueError):
-            return False
-
-        return os.path.normcase(str(resolved)) == os.path.normcase(str(path.absolute()))
+        return _iter_indexable_python_files(self.project_root)
 
     def _read_python_source(self, path: Path) -> str:
         with tokenize.open(path) as source_file:

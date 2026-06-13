@@ -249,7 +249,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         has_star_import = False
         for statement in body:
             if self._collect_module_binding_from_statement(
-                statement, final_bindings, unsafe_bindings, import_bindings
+                statement, final_bindings, unsafe_bindings, import_bindings, True
             ):
                 has_star_import = True
         symbols = {
@@ -268,6 +268,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         final_bindings: dict[str, str | None],
         unsafe_bindings: dict[str, bool],
         import_bindings: dict[str, tuple[str, str]],
+        allow_import_binding: bool,
     ) -> bool:
         has_star_import = False
         if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
@@ -298,12 +299,13 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             final_bindings[name] = None
             unsafe_bindings[name] = True
             import_bindings.pop(name, None)
-        import_bindings.update(self._collect_direct_from_import_bindings(statement))
+        if allow_import_binding:
+            import_bindings.update(self._collect_direct_from_import_bindings(statement))
 
         for child in ast.iter_child_nodes(statement):
             if isinstance(child, ast.stmt | ast.ExceptHandler | ast.match_case):
                 if self._collect_module_binding_from_statement(
-                    child, final_bindings, unsafe_bindings, import_bindings
+                    child, final_bindings, unsafe_bindings, import_bindings, False
                 ):
                     has_star_import = True
         return has_star_import

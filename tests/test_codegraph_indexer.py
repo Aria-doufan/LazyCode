@@ -210,6 +210,26 @@ def test_indexer_resolves_package_init_relative_from_import_function_calls(
     assert [(n.name, n.file_path) for n in callers] == [("run", "pkg/__init__.py")]
 
 
+def test_indexer_does_not_resolve_conditional_module_from_import(tmp_path: Path) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "helpers.py").write_text("def helper():\n    pass\n", encoding="utf-8")
+    (pkg / "service.py").write_text(
+        "if flag:\n"
+        "    from pkg.helpers import helper\n\n"
+        "def run():\n"
+        "    helper()\n",
+        encoding="utf-8",
+    )
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    indexer.index_all()
+    callers = store.get_callers("helper")
+
+    assert all(caller.name != "run" for caller in callers)
+
+
 def test_indexer_does_not_resolve_call_before_local_from_import(tmp_path: Path) -> None:
     pkg = tmp_path / "pkg"
     pkg.mkdir()
