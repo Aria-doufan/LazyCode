@@ -1035,16 +1035,6 @@ class Agent:
             coordinator_mode=self.coordinator_mode,
         )
 
-        tools = self.registry.get_all_schemas(self.protocol)
-
-        log.info(
-            "[run_to_completion] agent=%s tools=%d names=%s coordinator=%s",
-            self.agent_id,
-            len(tools),
-            [t["name"] for t in tools][:10],
-            self.coordinator_mode,
-        )
-
         last_text = ""
 
         for iteration in range(1, self.max_iterations + 1):
@@ -1074,6 +1064,15 @@ class Agent:
             )
             if _new_records:
                 append_replacement_records(self.session_dir, _new_records)
+
+            tools = self.registry.get_all_schemas(self.protocol)
+            log.info(
+                "[run_to_completion] agent=%s tools=%d names=%s coordinator=%s",
+                self.agent_id,
+                len(tools),
+                [t["name"] for t in tools][:10],
+                self.coordinator_mode,
+            )
 
             collector = StreamCollector()
             llm_stream = self.client.stream(api_conv, system=system, tools=tools)

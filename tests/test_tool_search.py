@@ -4,12 +4,16 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any, AsyncIterator
 
 import pytest
 from pydantic import BaseModel
 
+from lazycode.agent import Agent
+from lazycode.client import LLMClient
+from lazycode.conversation import ConversationManager
 from lazycode.tools import ToolRegistry
-from lazycode.tools.base import Tool, ToolResult
+from lazycode.tools.base import StreamEnd, StreamEvent, TextDelta, Tool, ToolCallComplete, ToolResult
 from lazycode.tools.impl.tool_search import ToolSearchTool
 
 # ---------------------------------------------------------------------------
@@ -112,6 +116,50 @@ async def test_tool_search_marks_discovered():
     assert "DeferredAlpha" in result.output
     assert reg.is_discovered("DeferredAlpha")
     assert not reg.is_discovered("DeferredBeta")
+
+
+@pytest.mark.asyncio
+async def test_run_to_completion_refreshes_schemas_after_tool_search(tmp_path):
+    """The turn after ToolSearch receives newly discovered deferred schemas."""
+
+    class CapturingClient(LLMClient):
+        def __init__(self) -> None:
+            self.tool_names_per_call: list[list[str]] = []
+            self._call_index = 0
+
+        async def stream(
+            self,
+            conversation: ConversationManager,
+            system: str = "",
+            tools: list[dict[str, Any]] | None = None,
+        ) -> AsyncIterator[StreamEvent]:
+            self.tool_names_per_call.append([tool["name"] for tool in tools or []])
+            self._call_index += 1
+            if self._call_index == 1:
+                yield ToolCallComplete(
+                    "t1",
+                    "ToolSearch",
+                    {"query": "select:DeferredAlpha"},
+                )
+                yield StreamEnd("end_turn", input_tokens=10, output_tokens=5)
+                return
+
+            yield TextDelta("Deferred schema is available.")
+            yield StreamEnd("end_turn", input_tokens=10, output_tokens=5)
+
+    reg = _make_registry()
+    reg.register(ToolSearchTool(reg, protocol="anthropic"))
+    client = CapturingClient()
+    agent = Agent(client, reg, "anthropic", work_dir=str(tmp_path), max_iterations=3)
+
+    result = await agent.run_to_completion("Load DeferredAlpha")
+
+    assert result == "Deferred schema is available."
+    assert len(client.tool_names_per_call) == 2
+    assert "ToolSearch" in client.tool_names_per_call[0]
+    assert "DeferredAlpha" not in client.tool_names_per_call[0]
+    assert "DeferredAlpha" in client.tool_names_per_call[1]
+
 
 def test_discovered_in_schemas():
     """Once a deferred tool is discovered, it should appear in get_all_schemas."""
