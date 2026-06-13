@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from lazycode.codegraph.models import EdgeRecord, FileRecord, NodeRecord
+from lazycode.codegraph import store as store_module
 from lazycode.codegraph.store import CodeGraphStore
 
 
@@ -57,6 +58,38 @@ def test_store_initializes_schema(tmp_path: Path) -> None:
     stats = store.stats()
 
     assert stats == {"files": 0, "nodes": 0, "edges": 0, "unresolved_refs": 0}
+
+
+def test_store_closes_connection_when_schema_creation_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeConnection:
+        def __init__(self) -> None:
+            self.closed = False
+            self.row_factory = None
+
+        def execute(self, statement: str) -> None:
+            return None
+
+        def close(self) -> None:
+            self.closed = True
+
+    fake_conn = FakeConnection()
+
+    def fake_connect(db_path: Path) -> FakeConnection:
+        return fake_conn
+
+    def fail_schema(self: CodeGraphStore) -> None:
+        raise RuntimeError("schema failed")
+
+    monkeypatch.setattr(store_module.sqlite3, "connect", fake_connect)
+    monkeypatch.setattr(CodeGraphStore, "_create_schema", fail_schema)
+
+    with pytest.raises(RuntimeError, match="schema failed"):
+        CodeGraphStore(tmp_path / "codegraph.sqlite")
+
+    assert fake_conn.closed
 
 
 def test_store_replaces_file_graph(tmp_path: Path) -> None:

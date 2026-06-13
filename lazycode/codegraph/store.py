@@ -17,9 +17,13 @@ class CodeGraphStore:
     def __init__(self, db_path: Path) -> None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(db_path)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA foreign_keys = ON")
-        self._create_schema()
+        try:
+            self._conn.row_factory = sqlite3.Row
+            self._conn.execute("PRAGMA foreign_keys = ON")
+            self._create_schema()
+        except Exception:
+            self._conn.close()
+            raise
 
     def close(self) -> None:
         self._conn.close()
@@ -155,6 +159,14 @@ class CodeGraphStore:
             (file_path,),
         ).fetchall()
         return [self._node_from_row(row) for row in rows]
+
+    def delete_files(self, paths: list[str]) -> int:
+        removed = 0
+        with self._conn:
+            for path in paths:
+                cursor = self._conn.execute("DELETE FROM files WHERE path = ?", (path,))
+                removed += cursor.rowcount
+        return removed
 
     def search_nodes(self, query: str, limit: int = 20) -> list[NodeRecord]:
         escaped_query = (

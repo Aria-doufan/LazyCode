@@ -22,8 +22,14 @@ def render_node_source(
     except ValueError:
         return f"Error: source path escapes project root: {node.file_path}"
 
-    with tokenize.open(source_path) as source_file:
-        lines = source_file.read().splitlines()
+    try:
+        if not source_path.is_file():
+            return f"Error: source file unavailable: {node.file_path}"
+        with tokenize.open(source_path) as source_file:
+            lines = source_file.read().splitlines()
+    except (OSError, SyntaxError, UnicodeError) as exc:
+        return f"Error: source file unavailable: {node.file_path} ({exc})"
+
     start_line = max(node.start_line, 1)
     end_line = max(node.end_line, start_line)
 

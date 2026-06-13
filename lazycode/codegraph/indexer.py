@@ -33,11 +33,15 @@ def stale_index_paths(project_root: Path, store: CodeGraphStore) -> list[str]:
             stale_paths.append(record.path)
             continue
 
-        if not path.exists():
+        try:
+            if not path.is_file():
+                stale_paths.append(record.path)
+                continue
+            content_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
             stale_paths.append(record.path)
             continue
 
-        content_hash = hashlib.sha256(path.read_bytes()).hexdigest()
         if content_hash != record.content_hash:
             stale_paths.append(record.path)
 
@@ -52,8 +56,14 @@ class CodeGraphIndexer:
     def index_all(self) -> dict[str, int]:
         indexed = 0
         skipped = 0
+        python_files = self._iter_python_files()
+        current_paths = {path.relative_to(self.project_root).as_posix() for path in python_files}
+        removed_paths = [
+            record.path for record in self.store.get_files() if record.path not in current_paths
+        ]
+        removed = self.store.delete_files(removed_paths)
 
-        for path in self._iter_python_files():
+        for path in python_files:
             raw_bytes = path.read_bytes()
             source = self._read_python_source(path)
             content_hash = hashlib.sha256(raw_bytes).hexdigest()
@@ -80,7 +90,7 @@ class CodeGraphIndexer:
             indexed += 1
 
         self.resolve_references()
-        return {"indexed": indexed, "skipped": skipped, "removed": 0}
+        return {"indexed": indexed, "skipped": skipped, "removed": removed}
 
     def resolve_references(self) -> int:
         edges: list[EdgeRecord] = []

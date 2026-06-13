@@ -101,6 +101,39 @@ async def test_explore_warns_when_indexed_file_changed(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_explore_warns_when_indexed_file_deleted(tmp_path: Path) -> None:
+    source = tmp_path / "pkg" / "service.py"
+    source.parent.mkdir()
+    source.write_text("def run():\n    return 'old'\n", encoding="utf-8")
+    await CodeGraphIndexTool(default_project_root=tmp_path).execute(CodeGraphIndexParams(project_path=""))
+    source.unlink()
+    tool = CodeGraphExploreTool(default_project_root=tmp_path)
+
+    result = await tool.execute(tool.params_model(query="run"))
+
+    assert not result.is_error
+    assert "Index may be stale" in result.output
+    assert "pkg/service.py" in result.output
+
+
+@pytest.mark.asyncio
+async def test_node_warns_when_indexed_file_replaced_by_directory(tmp_path: Path) -> None:
+    source = tmp_path / "pkg" / "service.py"
+    source.parent.mkdir()
+    source.write_text("def run():\n    return 'old'\n", encoding="utf-8")
+    await CodeGraphIndexTool(default_project_root=tmp_path).execute(CodeGraphIndexParams(project_path=""))
+    source.unlink()
+    source.mkdir()
+    tool = CodeGraphNodeTool(default_project_root=tmp_path)
+
+    result = await tool.execute(CodeGraphNodeParams(symbol="run"))
+
+    assert not result.is_error
+    assert "Index may be stale" in result.output
+    assert "pkg/service.py" in result.output
+
+
+@pytest.mark.asyncio
 async def test_codegraph_node_tool_reads_indexed_symbol(tmp_path: Path) -> None:
     source = tmp_path / "pkg" / "service.py"
     source.parent.mkdir()

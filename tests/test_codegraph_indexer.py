@@ -40,6 +40,22 @@ def test_indexer_skips_unchanged_files(tmp_path: Path) -> None:
     assert second == {"indexed": 0, "skipped": 1, "removed": 0}
 
 
+def test_indexer_removes_deleted_files(tmp_path: Path) -> None:
+    source = tmp_path / "pkg" / "service.py"
+    source.parent.mkdir()
+    source.write_text("def removed_symbol():\n    pass\n", encoding="utf-8")
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    first = indexer.index_all()
+    source.unlink()
+    second = indexer.index_all()
+
+    assert first == {"indexed": 1, "skipped": 0, "removed": 0}
+    assert second == {"indexed": 0, "skipped": 0, "removed": 1}
+    assert store.search_nodes("removed_symbol") == []
+
+
 def test_indexer_decodes_declared_python_source_encoding(tmp_path: Path) -> None:
     source = tmp_path / "pkg" / "latin1.py"
     source.parent.mkdir()
