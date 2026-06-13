@@ -141,6 +141,9 @@ class _PythonGraphVisitor(ast.NodeVisitor):
 
     def visit_If(self, node: ast.If) -> None:
         self.visit(node.test)
+        self._clear_local_import_bindings_for_names(
+            self._collect_expression_binding_names(node.test)
+        )
         self._visit_isolated_statement_sequence(node.body)
         self._visit_isolated_statement_sequence(node.orelse)
 
@@ -158,6 +161,9 @@ class _PythonGraphVisitor(ast.NodeVisitor):
 
     def visit_While(self, node: ast.While) -> None:
         self.visit(node.test)
+        self._clear_local_import_bindings_for_names(
+            self._collect_expression_binding_names(node.test)
+        )
         self._visit_loop_body_then_orelse(node.body, node.orelse)
 
     def visit_With(self, node: ast.With) -> None:
@@ -178,7 +184,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             self.visit(node.type)
         if node.name is not None:
             self._clear_local_import_bindings_for_names({node.name})
-        self._visit_statement_sequence(node.body)
+        self._visit_statement_sequence_with_temporary_callables(node.body)
 
     def visit_Match(self, node: ast.Match) -> None:
         self.visit(node.subject)
@@ -191,7 +197,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         )
         if node.guard is not None:
             self.visit(node.guard)
-        self._visit_statement_sequence(node.body)
+        self._visit_statement_sequence_with_temporary_callables(node.body)
 
     def _visit_with(self, node: ast.With | ast.AsyncWith) -> None:
         bound_names: set[str] = set()
@@ -211,6 +217,21 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             if self._in_callable_scope():
                 self._clear_local_import_bindings_after_visit(statement)
 
+    def _visit_statement_sequence_with_temporary_callables(
+        self, body: list[ast.stmt]
+    ) -> None:
+        if not self._in_callable_scope():
+            self._visit_statement_sequence(body)
+            return
+        scope = self.callable_scope_stack[-1]
+        symbols = dict(scope.symbols)
+        _, parent_qualified, _, _ = self.scope_stack[-1]
+        scope.symbols.update(self._collect_callable_symbols(body, parent_qualified))
+        try:
+            self._visit_statement_sequence(body)
+        finally:
+            scope.symbols = symbols
+
     def _visit_isolated_statement_sequence(self, body: list[ast.stmt]) -> None:
         if not self._in_callable_scope():
             self._visit_statement_sequence(body)
@@ -218,7 +239,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         scope = self.callable_scope_stack[-1]
         import_bindings = dict(scope.import_bindings)
         try:
-            self._visit_statement_sequence(body)
+            self._visit_statement_sequence_with_temporary_callables(body)
         finally:
             scope.import_bindings = import_bindings
 
@@ -232,10 +253,10 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         scope = self.callable_scope_stack[-1]
         import_bindings = dict(scope.import_bindings)
         try:
-            self._visit_statement_sequence(body)
+            self._visit_statement_sequence_with_temporary_callables(body)
         finally:
             scope.import_bindings = import_bindings
-        self._visit_statement_sequence(orelse)
+        self._visit_statement_sequence_with_temporary_callables(orelse)
 
     def _visit_isolated_node(self, node: ast.AST) -> None:
         if not self._in_callable_scope():
@@ -436,13 +457,6 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             node_id = self._unique_symbol_node_id(f"{self.file_path}::{qualified}", statement)
             self._precollected_node_ids[id(statement)] = node_id
             symbols[statement.name] = node_id
-            return
-        if isinstance(statement, ast.ClassDef):
-            return
-
-        for child in ast.iter_child_nodes(statement):
-            if isinstance(child, ast.stmt | ast.ExceptHandler | ast.match_case):
-                self._collect_callable_symbol_from_statement(child, parent_qualified, symbols)
 
     def _node_id_for(self, node: ast.FunctionDef | ast.AsyncFunctionDef, qualified: str) -> str:
         precollected_id = self._precollected_node_ids.get(id(node))
@@ -582,7 +596,9 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             names.update(self._collect_pattern_binding_names(statement.pattern))
 
         for child in ast.iter_child_nodes(statement):
-            if isinstance(child, ast.stmt | ast.ExceptHandler | ast.match_case):
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                names.add(child.name)
+            elif isinstance(child, ast.stmt | ast.ExceptHandler | ast.match_case):
                 names.update(self._collect_statement_binding_names(child))
             elif isinstance(child, ast.expr):
                 names.update(self._collect_expression_binding_names(child))

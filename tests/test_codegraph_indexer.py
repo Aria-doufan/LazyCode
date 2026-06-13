@@ -361,6 +361,31 @@ def test_indexer_does_not_resolve_local_from_import_after_nested_rebinding(
     assert all(caller.name != "run" for caller in callers)
 
 
+def test_indexer_does_not_resolve_local_from_import_after_walrus_condition_rebinding(
+    tmp_path: Path,
+) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "helpers.py").write_text("def helper():\n    pass\n", encoding="utf-8")
+    (pkg / "service.py").write_text(
+        "def get_helper():\n"
+        "    return lambda: None\n"
+        "\n"
+        "def run():\n"
+        "    from pkg.helpers import helper\n"
+        "    if (helper := get_helper()):\n"
+        "        helper()\n",
+        encoding="utf-8",
+    )
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    indexer.index_all()
+    callers = store.get_callers("helper")
+
+    assert all(caller.name != "run" for caller in callers)
+
+
 def test_indexer_does_not_resolve_local_from_import_after_rebinding_in_same_nested_block(
     tmp_path: Path,
 ) -> None:
