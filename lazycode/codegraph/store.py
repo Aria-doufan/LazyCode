@@ -132,8 +132,8 @@ class CodeGraphStore:
             self._conn.executemany(
                 """
                 INSERT INTO unresolved_refs (
-                    source, name, kind, line, col, file_path, is_resolvable
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    source, name, kind, line, col, file_path, is_resolvable, import_module, import_name
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -144,6 +144,8 @@ class CodeGraphStore:
                         ref.col,
                         ref.file_path,
                         int(ref.is_resolvable),
+                        ref.import_module,
+                        ref.import_name,
                     )
                     for ref in unresolved_refs
                 ],
@@ -200,7 +202,7 @@ class CodeGraphStore:
     def get_unresolved_refs(self) -> list[UnresolvedReference]:
         rows = self._conn.execute(
             """
-            SELECT source, name, kind, line, col, file_path, is_resolvable
+            SELECT source, name, kind, line, col, file_path, is_resolvable, import_module, import_name
             FROM unresolved_refs
             ORDER BY file_path, line
             """,
@@ -214,6 +216,8 @@ class CodeGraphStore:
                 col=int(row["col"]),
                 file_path=str(row["file_path"]),
                 is_resolvable=bool(row["is_resolvable"]),
+                import_module=str(row["import_module"] or ""),
+                import_name=str(row["import_name"] or ""),
             )
             for row in rows
         ]
@@ -230,6 +234,26 @@ class CodeGraphStore:
             LIMIT 2
             """,
             (short_name, short_name),
+        ).fetchall()
+        if len(rows) != 1:
+            return None
+        return self._node_from_row(rows[0])
+
+    def find_callable_by_module_import(
+        self, module: str, name: str
+    ) -> NodeRecord | None:
+        module_path = module.replace(".", "/")
+        rows = self._conn.execute(
+            """
+            SELECT * FROM nodes
+            WHERE kind = 'function'
+              AND name = ?
+              AND qualified_name = ?
+              AND file_path IN (?, ?)
+            ORDER BY file_path
+            LIMIT 2
+            """,
+            (name, name, f"{module_path}.py", f"{module_path}/__init__.py"),
         ).fetchall()
         if len(rows) != 1:
             return None
@@ -367,6 +391,8 @@ class CodeGraphStore:
                 col INTEGER NOT NULL,
                 file_path TEXT NOT NULL,
                 is_resolvable INTEGER NOT NULL DEFAULT 1,
+                import_module TEXT NOT NULL DEFAULT '',
+                import_name TEXT NOT NULL DEFAULT '',
                 FOREIGN KEY (source) REFERENCES nodes(id) ON DELETE CASCADE,
                 FOREIGN KEY (file_path) REFERENCES files(path) ON DELETE CASCADE
             );
@@ -387,4 +413,12 @@ class CodeGraphStore:
         if "is_resolvable" not in columns:
             self._conn.execute(
                 "ALTER TABLE unresolved_refs ADD COLUMN is_resolvable INTEGER NOT NULL DEFAULT 1"
+            )
+        if "import_module" not in columns:
+            self._conn.execute(
+                "ALTER TABLE unresolved_refs ADD COLUMN import_module TEXT NOT NULL DEFAULT ''"
+            )
+        if "import_name" not in columns:
+            self._conn.execute(
+                "ALTER TABLE unresolved_refs ADD COLUMN import_name TEXT NOT NULL DEFAULT ''"
             )

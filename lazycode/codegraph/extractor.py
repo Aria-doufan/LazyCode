@@ -20,6 +20,7 @@ class _CallableScope:
     bare_call_visible: bool
     shadowed_names: set[str] = field(default_factory=set)
     unsafe_unknown_names: bool = False
+    import_bindings: dict[str, tuple[str, str]] = field(default_factory=dict)
 
 
 def extract_python_graph(file_path: str, source: str) -> ExtractionResult:
@@ -71,6 +72,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             module_symbols,
             module_shadowed_names,
             module_has_star_import,
+            module_import_bindings,
         ) = self._collect_module_resolution_state(tree.body)
         self.callable_scope_stack.append(
             _CallableScope(
@@ -78,6 +80,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
                 True,
                 module_shadowed_names,
                 module_has_star_import,
+                module_import_bindings,
             )
         )
         self.visit(tree)
@@ -160,6 +163,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
                 self._collect_callable_symbols(node.body, qualified),
                 True,
                 self._collect_local_shadowed_names(node),
+                import_bindings=self._collect_local_from_import_bindings(node.body),
             )
         )
         for statement in node.body:
@@ -184,6 +188,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
                     )
                 )
             elif call_name:
+                import_module, import_name = self._resolve_import_binding(call_name)
                 self.result.unresolved_refs.append(
                     UnresolvedReference(
                         source=current_id,
@@ -193,6 +198,8 @@ class _PythonGraphVisitor(ast.NodeVisitor):
                         col=getattr(node, "col_offset", 0),
                         file_path=self.file_path,
                         is_resolvable=self._is_resolvable_unresolved_reference(call_name),
+                        import_module=import_module,
+                        import_name=import_name,
                     )
                 )
         self.generic_visit(node)
@@ -234,13 +241,14 @@ class _PythonGraphVisitor(ast.NodeVisitor):
 
     def _collect_module_resolution_state(
         self, body: list[ast.stmt]
-    ) -> tuple[dict[str, str], set[str], bool]:
+    ) -> tuple[dict[str, str], set[str], bool, dict[str, tuple[str, str]]]:
         final_bindings: dict[str, str | None] = {}
         unsafe_bindings: dict[str, bool] = {}
+        import_bindings: dict[str, tuple[str, str]] = {}
         has_star_import = False
         for statement in body:
             if self._collect_module_binding_from_statement(
-                statement, final_bindings, unsafe_bindings
+                statement, final_bindings, unsafe_bindings, import_bindings
             ):
                 has_star_import = True
         symbols = {
@@ -251,13 +259,14 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             for name, node_id in final_bindings.items()
             if node_id is None and unsafe_bindings.get(name, False)
         }
-        return symbols, shadowed_names, has_star_import
+        return symbols, shadowed_names, has_star_import, import_bindings
 
     def _collect_module_binding_from_statement(
         self,
         statement: ast.AST,
         final_bindings: dict[str, str | None],
         unsafe_bindings: dict[str, bool],
+        import_bindings: dict[str, tuple[str, str]],
     ) -> bool:
         has_star_import = False
         if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
@@ -266,28 +275,34 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             self._precollected_node_ids[id(statement)] = node_id
             final_bindings[statement.name] = node_id
             unsafe_bindings[statement.name] = False
+            import_bindings.pop(statement.name, None)
             return has_star_import
         if isinstance(statement, ast.ClassDef):
             final_bindings[statement.name] = None
             unsafe_bindings[statement.name] = True
+            import_bindings.pop(statement.name, None)
             return has_star_import
         if isinstance(statement, ast.ImportFrom) and any(alias.name == "*" for alias in statement.names):
             for name in list(final_bindings):
                 final_bindings[name] = None
                 unsafe_bindings[name] = True
+            import_bindings.clear()
             return True
 
         for name in self._collect_direct_module_binding_names(statement):
             final_bindings[name] = None
             unsafe_bindings[name] = True
+            import_bindings.pop(name, None)
         for name in self._collect_direct_module_import_names(statement):
             final_bindings[name] = None
             unsafe_bindings[name] = True
+            import_bindings.pop(name, None)
+        import_bindings.update(self._collect_direct_from_import_bindings(statement))
 
         for child in ast.iter_child_nodes(statement):
             if isinstance(child, ast.stmt | ast.ExceptHandler | ast.match_case):
                 if self._collect_module_binding_from_statement(
-                    child, final_bindings, unsafe_bindings
+                    child, final_bindings, unsafe_bindings, import_bindings
                 ):
                     has_star_import = True
         return has_star_import
@@ -351,6 +366,40 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         if isinstance(statement, ast.ImportFrom):
             return {alias.asname or alias.name for alias in statement.names if alias.name != "*"}
         return set()
+
+    def _collect_direct_from_import_bindings(
+        self, statement: ast.AST
+    ) -> dict[str, tuple[str, str]]:
+        if not isinstance(statement, ast.ImportFrom):
+            return {}
+        module = self._absolute_import_module(statement)
+        if not module:
+            return {}
+        return {
+            alias.asname or alias.name: (module, alias.name)
+            for alias in statement.names
+            if alias.name != "*"
+        }
+
+    def _collect_local_from_import_bindings(
+        self, body: list[ast.stmt]
+    ) -> dict[str, tuple[str, str]]:
+        import_bindings: dict[str, tuple[str, str]] = {}
+        for statement in body:
+            for name in self._collect_direct_statement_binding_names(statement):
+                import_bindings.pop(name, None)
+            import_bindings.update(self._collect_direct_from_import_bindings(statement))
+        return import_bindings
+
+    def _absolute_import_module(self, statement: ast.ImportFrom) -> str:
+        if statement.level == 0:
+            return statement.module or ""
+        package_parts = self.module_name.split(".")[:-1]
+        if statement.level > 1:
+            package_parts = package_parts[: -(statement.level - 1)]
+        if statement.module:
+            package_parts.extend(statement.module.split("."))
+        return ".".join(part for part in package_parts if part)
 
     def _collect_direct_statement_binding_names(self, statement: ast.AST) -> set[str]:
         names: set[str] = set()
@@ -453,6 +502,17 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             if target_id is not None:
                 return target_id
         return None
+
+    def _resolve_import_binding(self, call_name: str) -> tuple[str, str]:
+        if "." in call_name:
+            return "", ""
+        for scope in reversed(self.callable_scope_stack):
+            binding = scope.import_bindings.get(call_name)
+            if binding is not None:
+                return binding
+            if call_name in scope.shadowed_names or call_name in scope.symbols:
+                return "", ""
+        return "", ""
 
     def _is_resolvable_unresolved_reference(self, call_name: str) -> bool:
         if "." in call_name:

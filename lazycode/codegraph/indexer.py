@@ -104,9 +104,13 @@ class CodeGraphIndexer:
     def resolve_references(self) -> int:
         edges: list[EdgeRecord] = []
         for ref in self.store.get_unresolved_refs():
-            if not ref.is_resolvable or "." in ref.name:
-                continue
-            target = self.store.find_callable_by_name(ref.name)
+            target = None
+            if ref.import_module and ref.import_name:
+                target = self.store.find_callable_by_module_import(
+                    ref.import_module, ref.import_name
+                )
+            elif ref.is_resolvable and "." not in ref.name:
+                target = self.store.find_callable_by_name(ref.name)
             if target is None:
                 continue
             edges.append(

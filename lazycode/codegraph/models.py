@@ -64,3 +64,5 @@ class UnresolvedReference:
     col: int
     file_path: str
     is_resolvable: bool = True
+    import_module: str = ""
+    import_name: str = ""
