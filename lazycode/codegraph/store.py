@@ -164,7 +164,7 @@ class CodeGraphStore:
         rows = self._conn.execute(
             """
             SELECT * FROM nodes
-            ORDER BY file_path, start_line
+            ORDER BY file_path, start_line, end_line, kind, qualified_name, id
             """
         ).fetchall()
         return [self._node_from_row(row) for row in rows]

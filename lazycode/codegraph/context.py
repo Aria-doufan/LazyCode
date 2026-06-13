@@ -96,7 +96,7 @@ def _rank_nodes(nodes: list[NodeRecord], query: str) -> list[NodeRecord]:
         for term in query.replace("_", " ").replace(".", " ").split()
         if term
     ]
-    ranked_nodes: list[tuple[int, int, str, int, NodeRecord]] = []
+    ranked_nodes: list[tuple[int, int, NodeRecord]] = []
     for node in nodes:
         haystack = " ".join(
             [
@@ -110,13 +110,22 @@ def _rank_nodes(nodes: list[NodeRecord], query: str) -> list[NodeRecord]:
         if score == 0:
             continue
         kind_bonus = 2 if node.kind in {"function", "method", "class"} else 0
-        ranked_nodes.append((score, kind_bonus, node.file_path, node.start_line, node))
+        ranked_nodes.append((score, kind_bonus, node))
 
     return [
         node
-        for _, _, _, _, node in sorted(
+        for _, _, node in sorted(
             ranked_nodes,
-            key=lambda item: (-item[0], -item[1], item[2], item[3]),
+            key=lambda item: (
+                -item[0],
+                -item[1],
+                item[2].file_path,
+                item[2].start_line,
+                item[2].end_line,
+                item[2].kind,
+                item[2].qualified_name,
+                item[2].id,
+            ),
         )
     ]
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from lazycode.codegraph.context import build_explore_context, render_node_source
+from lazycode.codegraph.context import _rank_nodes, build_explore_context, render_node_source
 from lazycode.codegraph.indexer import CodeGraphIndexer
 from lazycode.codegraph.models import NodeRecord
 from lazycode.codegraph.store import CodeGraphStore
@@ -99,6 +99,49 @@ def test_render_node_source_truncates_within_max_chars(tmp_path: Path) -> None:
 
     assert len(output) <= 25
     assert "<truncated>" in output
+
+
+def test_rank_nodes_uses_stable_tie_breakers() -> None:
+    nodes = [
+        NodeRecord(
+            id="target-z",
+            kind="function",
+            name="target",
+            qualified_name="target.Zeta",
+            file_path="module.py",
+            language="python",
+            start_line=1,
+            end_line=2,
+        ),
+        NodeRecord(
+            id="target-a",
+            kind="function",
+            name="target",
+            qualified_name="target.Alpha",
+            file_path="module.py",
+            language="python",
+            start_line=1,
+            end_line=2,
+        ),
+        NodeRecord(
+            id="target-b",
+            kind="function",
+            name="target",
+            qualified_name="target.Beta",
+            file_path="module.py",
+            language="python",
+            start_line=1,
+            end_line=2,
+        ),
+    ]
+
+    ranked = _rank_nodes(nodes, "target")
+
+    assert [node.qualified_name for node in ranked] == [
+        "target.Alpha",
+        "target.Beta",
+        "target.Zeta",
+    ]
 
 
 def test_build_explore_context_deduplicates_duplicate_source_ranges(
