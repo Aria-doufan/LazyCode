@@ -291,6 +291,29 @@ def test_indexer_does_not_resolve_local_from_import_from_sibling_if_branch(
     assert all(caller.name != "run" for caller in callers)
 
 
+def test_indexer_does_not_resolve_loop_body_from_import_in_for_else(
+    tmp_path: Path,
+) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "helpers.py").write_text("def helper():\n    pass\n", encoding="utf-8")
+    (pkg / "service.py").write_text(
+        "def run(items):\n"
+        "    for item in items:\n"
+        "        from pkg.helpers import helper\n"
+        "    else:\n"
+        "        helper()\n",
+        encoding="utf-8",
+    )
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    indexer.index_all()
+    callers = store.get_callers("helper")
+
+    assert all(caller.name != "run" for caller in callers)
+
+
 def test_indexer_does_not_resolve_enclosing_local_from_import_in_nested_function(
     tmp_path: Path,
 ) -> None:

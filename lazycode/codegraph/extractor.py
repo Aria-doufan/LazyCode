@@ -148,20 +148,17 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         self.visit(node.iter)
         self.visit(node.target)
         self._clear_local_import_bindings_for_names(self._collect_target_names(node.target))
-        self._visit_statement_sequence(node.body)
-        self._visit_statement_sequence(node.orelse)
+        self._visit_loop_body_then_orelse(node.body, node.orelse)
 
     def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
         self.visit(node.iter)
         self.visit(node.target)
         self._clear_local_import_bindings_for_names(self._collect_target_names(node.target))
-        self._visit_statement_sequence(node.body)
-        self._visit_statement_sequence(node.orelse)
+        self._visit_loop_body_then_orelse(node.body, node.orelse)
 
     def visit_While(self, node: ast.While) -> None:
         self.visit(node.test)
-        self._visit_statement_sequence(node.body)
-        self._visit_statement_sequence(node.orelse)
+        self._visit_loop_body_then_orelse(node.body, node.orelse)
 
     def visit_With(self, node: ast.With) -> None:
         self._visit_with(node)
@@ -224,6 +221,21 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             self._visit_statement_sequence(body)
         finally:
             scope.import_bindings = import_bindings
+
+    def _visit_loop_body_then_orelse(
+        self, body: list[ast.stmt], orelse: list[ast.stmt]
+    ) -> None:
+        if not self._in_callable_scope():
+            self._visit_statement_sequence(body)
+            self._visit_statement_sequence(orelse)
+            return
+        scope = self.callable_scope_stack[-1]
+        import_bindings = dict(scope.import_bindings)
+        try:
+            self._visit_statement_sequence(body)
+        finally:
+            scope.import_bindings = import_bindings
+        self._visit_statement_sequence(orelse)
 
     def _visit_isolated_node(self, node: ast.AST) -> None:
         if not self._in_callable_scope():
