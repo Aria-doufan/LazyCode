@@ -185,6 +185,48 @@ def run() -> None:
     assert ("pkg/service.py::run", "inner", "calls") in unresolved
 
 
+def test_nested_function_call_before_definition_does_not_resolve() -> None:
+    source = """\
+def outer() -> None:
+    inner()
+
+    def inner() -> None:
+        pass
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    calls = {(e.source, e.target, e.kind) for e in result.edges if e.kind == "calls"}
+    assert ("pkg/service.py::outer", "pkg/service.py::outer.inner", "calls") not in calls
+    refs = [
+        ref
+        for ref in result.unresolved_refs
+        if ref.source == "pkg/service.py::outer" and ref.name == "inner"
+    ]
+    assert refs
+    assert all(not ref.is_resolvable for ref in refs)
+
+
+def test_nested_function_call_after_definition_resolves() -> None:
+    source = """\
+def outer() -> None:
+    def inner() -> None:
+        pass
+
+    inner()
+"""
+
+    result = extract_python_graph("pkg/service.py", source)
+
+    calls = {(e.source, e.target, e.kind) for e in result.edges if e.kind == "calls"}
+    assert ("pkg/service.py::outer", "pkg/service.py::outer.inner", "calls") in calls
+    assert not [
+        ref
+        for ref in result.unresolved_refs
+        if ref.source == "pkg/service.py::outer" and ref.name == "inner"
+    ]
+
+
 def test_nested_function_rebind_shadows_callable_resolution() -> None:
     source = """\
 def shadowed() -> None:

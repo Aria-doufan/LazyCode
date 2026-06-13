@@ -21,6 +21,7 @@ class _CallableScope:
     shadowed_names: set[str] = field(default_factory=set)
     unsafe_unknown_names: bool = False
     import_bindings: dict[str, tuple[str, str]] = field(default_factory=dict)
+    pending_callable_names: set[str] = field(default_factory=set)
 
 
 def extract_python_graph(file_path: str, source: str) -> ExtractionResult:
@@ -225,12 +226,12 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             return
         scope = self.callable_scope_stack[-1]
         symbols = dict(scope.symbols)
-        _, parent_qualified, _, _ = self.scope_stack[-1]
-        scope.symbols.update(self._collect_callable_symbols(body, parent_qualified))
+        pending_callable_names = set(scope.pending_callable_names)
         try:
             self._visit_statement_sequence(body)
         finally:
             scope.symbols = symbols
+            scope.pending_callable_names = pending_callable_names
 
     def _visit_isolated_statement_sequence(self, body: list[ast.stmt]) -> None:
         if not self._in_callable_scope():
@@ -296,12 +297,17 @@ class _PythonGraphVisitor(ast.NodeVisitor):
             )
         )
         self._add_contains_edge(parent_id, node_id, node)
+        if self._in_callable_scope():
+            parent_scope = self.callable_scope_stack[-1]
+            parent_scope.symbols[node.name] = node_id
+            parent_scope.pending_callable_names.discard(node.name)
         self.scope_stack.append((node_id, qualified, False, True))
         self.callable_scope_stack.append(
             _CallableScope(
-                self._collect_callable_symbols(node.body, qualified),
+                {},
                 True,
                 self._collect_local_shadowed_names(node),
+                pending_callable_names=self._collect_direct_callable_names(node.body),
             )
         )
         for statement in node.body:
@@ -378,6 +384,13 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         for statement in body:
             self._collect_callable_symbol_from_statement(statement, parent_qualified, symbols)
         return symbols
+
+    def _collect_direct_callable_names(self, body: list[ast.stmt]) -> set[str]:
+        return {
+            statement.name
+            for statement in body
+            if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef)
+        }
 
     def _collect_module_resolution_state(
         self, body: list[ast.stmt]
@@ -644,7 +657,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         for scope in reversed(self.callable_scope_stack):
             if not scope.bare_call_visible:
                 continue
-            if call_name in scope.shadowed_names:
+            if call_name in scope.shadowed_names or call_name in scope.pending_callable_names:
                 return None
             target_id = scope.symbols.get(call_name)
             if target_id is not None:
@@ -661,7 +674,11 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         binding = current_scope.import_bindings.get(call_name)
         if binding is not None:
             return binding
-        if call_name in current_scope.shadowed_names or call_name in current_scope.symbols:
+        if (
+            call_name in current_scope.shadowed_names
+            or call_name in current_scope.symbols
+            or call_name in current_scope.pending_callable_names
+        ):
             return "", ""
 
         module_scope = self.callable_scope_stack[0]
@@ -670,6 +687,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
                 call_name in enclosing_scope.import_bindings
                 or call_name in enclosing_scope.shadowed_names
                 or call_name in enclosing_scope.symbols
+                or call_name in enclosing_scope.pending_callable_names
             ):
                 return "", ""
 
@@ -682,7 +700,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
         if "." in call_name:
             return False
         for scope in reversed(self.callable_scope_stack):
-            if call_name in scope.shadowed_names:
+            if call_name in scope.shadowed_names or call_name in scope.pending_callable_names:
                 return False
             if not scope.bare_call_visible and call_name in scope.symbols:
                 return False

@@ -28,6 +28,24 @@ def test_indexer_indexes_python_files(tmp_path: Path) -> None:
     assert nodes[0].file_path == "pkg/service.py"
 
 
+def test_indexer_indexes_good_file_when_another_file_has_syntax_error(tmp_path: Path) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    good = pkg / "good.py"
+    bad = pkg / "bad.py"
+    good.write_text("def searchable_good_symbol():\n    pass\n", encoding="utf-8")
+    bad.write_text("def broken(:\n    pass\n", encoding="utf-8")
+    store = CodeGraphStore(tmp_path / ".lazycode" / "codegraph.sqlite")
+    indexer = CodeGraphIndexer(tmp_path, store)
+
+    result = indexer.index_all()
+
+    assert result == {"indexed": 1, "skipped": 0, "removed": 0}
+    nodes = store.search_nodes("searchable_good_symbol")
+    assert len(nodes) == 1
+    assert nodes[0].file_path == "pkg/good.py"
+
+
 def test_indexer_skips_unchanged_files(tmp_path: Path) -> None:
     source = tmp_path / "pkg" / "service.py"
     source.parent.mkdir()

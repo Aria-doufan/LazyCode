@@ -113,16 +113,20 @@ class CodeGraphIndexer:
         removed = self.store.delete_files(removed_paths)
 
         for path in python_files:
-            raw_bytes = path.read_bytes()
-            source = self._read_python_source(path)
-            content_hash = hashlib.sha256(raw_bytes).hexdigest()
-            file_path = path.relative_to(self.project_root).as_posix()
+            try:
+                raw_bytes = path.read_bytes()
+                source = self._read_python_source(path)
+                content_hash = hashlib.sha256(raw_bytes).hexdigest()
+                file_path = path.relative_to(self.project_root).as_posix()
 
-            if self.store.get_file_hash(file_path) == content_hash:
-                skipped += 1
+                if self.store.get_file_hash(file_path) == content_hash:
+                    skipped += 1
+                    continue
+
+                graph = extract_python_graph(file_path, source)
+            except (OSError, SyntaxError, UnicodeError):
                 continue
 
-            graph = extract_python_graph(file_path, source)
             self.store.replace_file_graph(
                 FileRecord(
                     path=file_path,
