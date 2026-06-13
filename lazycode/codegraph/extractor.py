@@ -394,7 +394,7 @@ class _PythonGraphVisitor(ast.NodeVisitor):
     def _clear_local_import_bindings_after_visit(self, statement: ast.stmt) -> None:
         if isinstance(statement, ast.ImportFrom):
             return
-        bound_names = self._collect_direct_statement_binding_names(statement)
+        bound_names = self._collect_statement_binding_names(statement)
         if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
             bound_names.add(statement.name)
         for name in bound_names:
