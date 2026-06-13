@@ -13,6 +13,24 @@ def test_default_db_path_uses_lazycode_directory(tmp_path: Path) -> None:
     assert default_db_path(tmp_path) == tmp_path / ".lazycode" / "codegraph.sqlite"
 
 
+def test_default_db_path_rejects_symlinked_database_file_escape(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    db_dir = project / ".lazycode"
+    db_dir.mkdir()
+    outside = tmp_path / "outside.sqlite"
+    outside.write_bytes(b"outside")
+    try:
+        (db_dir / "codegraph.sqlite").symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+
+    with pytest.raises(ValueError, match="database path must remain inside project root"):
+        default_db_path(project)
+
+    assert outside.read_bytes() == b"outside"
+
+
 def test_indexer_indexes_python_files(tmp_path: Path) -> None:
     source = tmp_path / "pkg" / "service.py"
     source.parent.mkdir()

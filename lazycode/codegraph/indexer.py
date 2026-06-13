@@ -16,14 +16,21 @@ SKIP_DIRS = {".git", ".lazycode", ".venv", "node_modules", "__pycache__", ".pyte
 def default_db_path(project_root: Path) -> Path:
     root = project_root.resolve()
     db_dir = root / ".lazycode"
+    db_path = db_dir / "codegraph.sqlite"
     try:
         resolved_db_dir = db_dir.resolve(strict=False)
         resolved_db_dir.relative_to(root)
+        if db_path.is_symlink():
+            raise ValueError("CodeGraph database file must not be a symlink")
+        if db_path.exists():
+            resolved_db_path = db_path.resolve(strict=True)
+            resolved_db_path.relative_to(root)
+            return resolved_db_path
     except OSError as exc:
         raise ValueError(f"resolving CodeGraph database path failed: {exc}") from exc
     except ValueError as exc:
         raise ValueError("CodeGraph database path must remain inside project root") from exc
-    return db_dir / "codegraph.sqlite"
+    return resolved_db_dir / "codegraph.sqlite"
 
 
 def stale_index_paths(project_root: Path, store: CodeGraphStore) -> list[str]:
