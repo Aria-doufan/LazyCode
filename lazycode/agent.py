@@ -26,7 +26,7 @@ from lazycode.context import (
     load_replacement_records,
     reconstruct_replacement_state,
 )
-from lazycode.conversation import ConversationManager, ToolResultBlock, ToolUseBlock
+from lazycode.conversation import ConversationManager, Message, ToolResultBlock, ToolUseBlock
 from lazycode.conversation import ThinkingBlock as ConvThinkingBlock
 from lazycode.memory.auto_memory import MemoryManager
 from lazycode.permissions import (
@@ -129,6 +129,7 @@ class CompactNotification:
     """表示压缩通知。"""
     before_tokens: int
     message: str
+    checkpoint_messages: list[Message] = field(default_factory=list)
 
 
 @dataclass
@@ -489,14 +490,16 @@ class Agent:
                 tool_schemas=self.registry.get_all_schemas(self.protocol),
             )
             if isinstance(compact_result, CompactEvent):
-                yield CompactNotification(
-                    before_tokens=compact_result.before_tokens,
-                    message=f"上下文已压缩（压缩前 {compact_result.before_tokens:,} tokens）",
-                )
+                checkpoint_messages = list(conversation.history)
                 conversation.inject_environment(env_context)
                 mem = self.memory_manager.load() if self.memory_manager else ""
                 conversation.inject_long_term_memory(
                     self.instructions_content, mem
+                )
+                yield CompactNotification(
+                    before_tokens=compact_result.before_tokens,
+                    message=f"上下文已压缩（压缩前 {compact_result.before_tokens:,} tokens）",
+                    checkpoint_messages=checkpoint_messages,
                 )
             elif isinstance(compact_result, str):
                 yield ErrorEvent(message=compact_result)
@@ -975,9 +978,10 @@ class Agent:
             tool_schemas=self.registry.get_all_schemas(self.protocol),
         )
         if isinstance(result, CompactEvent):
+            checkpoint_messages = list(conversation.history)
             env_context = build_environment_context(
-            self.work_dir, self.active_skills, self._skill_catalog, self._agent_catalog
-        )
+                self.work_dir, self.active_skills, self._skill_catalog, self._agent_catalog
+            )
             conversation.inject_environment(env_context)
             memory_content = self.memory_manager.load() if self.memory_manager else ""
             conversation.inject_long_term_memory(
@@ -986,6 +990,7 @@ class Agent:
             return CompactNotification(
                 before_tokens=result.before_tokens,
                 message=f"上下文已压缩（压缩前 {result.before_tokens:,} tokens）",
+                checkpoint_messages=checkpoint_messages,
             )
         return ErrorEvent(message=result or "压缩失败：对话历史为空或未达到压缩条件")
 

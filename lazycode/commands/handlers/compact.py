@@ -20,6 +20,8 @@ async def handle_compact(ctx: CommandContext) -> None:
 
     result = await ctx.agent.manual_compact(ctx.conversation)
     if isinstance(result, CompactNotification):
+        if ctx.session and result.checkpoint_messages:
+            ctx.session.append_compact_checkpoint(result.checkpoint_messages)
         ctx.ui.add_system_message(result.message)
     elif isinstance(result, ErrorEvent):
         ctx.ui.add_system_message(f"压缩失败: {result.message}")

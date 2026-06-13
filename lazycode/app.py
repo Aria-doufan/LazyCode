@@ -1306,6 +1306,9 @@ class LazyCodeApp(App):
                     )
 
                 elif isinstance(event, CompactNotification):
+                    if self.session and event.checkpoint_messages:
+                        self.session.append_compact_checkpoint(event.checkpoint_messages)
+                        history_cursor = len(self.conversation.history)
                     self._show_system_message(event.message)
 
                 elif isinstance(event, ErrorEvent):

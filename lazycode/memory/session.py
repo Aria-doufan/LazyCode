@@ -124,6 +124,48 @@ class SessionRecord:
 # ---------------------------------------------------------------------------
 
 
+def messages_to_checkpoint_content(messages: list[Message]) -> list[dict[str, Any]]:
+    """将compact后的消息保存为checkpoint内容。"""
+    items: list[dict[str, Any]] = []
+    for message in messages:
+        for record in SessionRecord.from_message(message):
+            item: dict[str, Any] = {
+                "type": record.type.value,
+                "content": record.content,
+            }
+            if record.tool_use_id is not None:
+                item["tool_use_id"] = record.tool_use_id
+            if record.type == RecordType.TOOL_RESULT:
+                item["is_error"] = record.is_error
+            items.append(item)
+    return items
+
+
+def checkpoint_content_to_messages(content: Any) -> list[Message]:
+    """将checkpoint内容恢复为消息。"""
+    if isinstance(content, str):
+        return [Message(role="user", content=f"[摘要]\n{content}")]
+    if not isinstance(content, list):
+        return []
+
+    now = datetime.now(timezone.utc)
+    records: list[SessionRecord] = []
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        try:
+            records.append(SessionRecord(
+                type=RecordType(item["type"]),
+                content=item.get("content"),
+                timestamp=now,
+                tool_use_id=item.get("tool_use_id"),
+                is_error=item.get("is_error", False),
+            ))
+        except (KeyError, ValueError):
+            continue
+    return records_to_messages(records)
+
+
 def records_to_messages(records: list[SessionRecord]) -> list[Message]:
     """处理records to 消息。"""
     messages: list[Message] = []
@@ -154,12 +196,7 @@ def records_to_messages(records: list[SessionRecord]) -> list[Message]:
             continue
 
         if record.type == RecordType.COMPRESSION:
-            messages.append(
-                Message(
-                    role="user",
-                    content=f"[摘要]\n{record.content}",
-                )
-            )
+            messages.extend(checkpoint_content_to_messages(record.content))
             continue
 
         if record.type == RecordType.USER:
@@ -304,6 +341,18 @@ class Session:
         if not self.meta.title and message.role == "user" and message.content:
             self.meta.title = message.content[:TITLE_MAX_LENGTH]
 
+        self.meta.save(self._sessions_dir / f"{self.session_id}.meta")
+
+    def append_compact_checkpoint(self, messages: list[Message]) -> None:
+        """追加compact checkpoint，不计入原始消息数。"""
+        record = SessionRecord(
+            type=RecordType.COMPRESSION,
+            content=messages_to_checkpoint_content(messages),
+            timestamp=datetime.now(timezone.utc),
+        )
+        self._file.write(record.to_jsonl() + "\n")
+        self._file.flush()
+        self.meta.last_active = record.timestamp
         self.meta.save(self._sessions_dir / f"{self.session_id}.meta")
 
 
@@ -460,6 +509,12 @@ class SessionManager:
 
         valid_count = validate_message_chain(records)
         records = records[:valid_count]
+        checkpoint_idx = max(
+            (i for i, record in enumerate(records) if record.type == RecordType.COMPRESSION),
+            default=-1,
+        )
+        if checkpoint_idx >= 0:
+            records = records[checkpoint_idx:]
         messages = records_to_messages(records)
 
         file = open(jsonl_path, "a", encoding="utf-8")  # noqa: SIM115

@@ -372,6 +372,36 @@ class TestSessionResume:
         assert len(result.messages) == 2
         result.session.close()
 
+    def test_resume_uses_latest_compact_checkpoint_and_later_raw_messages(self, tmp_path: Path) -> None:
+        mgr = SessionManager(str(tmp_path))
+        s = mgr.create()
+        sid = s.session_id
+        s.append(Message(role="user", content="original question"))
+        s.append(Message(role="assistant", content="original answer"))
+        s.append_compact_checkpoint([
+            Message(role="user", content="[摘要]\noriginal exchange summary"),
+            Message(role="assistant", content="上面是之前对话的摘要。"),
+        ])
+        s.append(Message(role="user", content="follow-up"))
+        s.append(Message(role="assistant", content="follow-up answer"))
+        s.close()
+
+        result = mgr.resume(sid)
+        assert result is not None
+        assert [m.content for m in result.messages] == [
+            "[摘要]\noriginal exchange summary",
+            "上面是之前对话的摘要。",
+            "follow-up",
+            "follow-up answer",
+        ]
+
+        raw_lines = (
+            tmp_path / ".lazycode" / "sessions" / f"{sid}.jsonl"
+        ).read_text(encoding="utf-8").strip().split("\n")
+        assert json.loads(raw_lines[0])["content"] == "original question"
+        assert json.loads(raw_lines[1])["content"] == "original answer"
+        result.session.close()
+
 # =========================================================================
 # E. 时间间隔消息
 # =========================================================================
