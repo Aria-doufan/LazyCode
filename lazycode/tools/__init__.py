@@ -112,6 +112,8 @@ class ToolRegistry:
             tool = self._tools.get(name)
             if tool is None:
                 continue
+            if name in self._disabled:
+                continue
             if not getattr(tool, "should_defer", False):
                 continue
             base = tool.get_schema()
@@ -168,4 +170,16 @@ def create_default_registry(file_cache: FileCache | None = None) -> ToolRegistry
     registry.register(Bash())
     registry.register(Glob())
     registry.register(Grep())
+
+    from lazycode.tools.codegraph import (
+        CodeGraphCallersTool,
+        CodeGraphExploreTool,
+        CodeGraphIndexTool,
+        CodeGraphNodeTool,
+    )
+
+    registry.register(CodeGraphIndexTool())
+    registry.register(CodeGraphExploreTool())
+    registry.register(CodeGraphNodeTool())
+    registry.register(CodeGraphCallersTool())
     return registry
