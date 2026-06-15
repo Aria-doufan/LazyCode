@@ -4,8 +4,8 @@ import asyncio
 import logging
 from dataclasses import dataclass
 
-from lazycode.hooks.executors import execute_action
-from lazycode.hooks.models import ActionResult, Hook, HookContext, ToolRejectedError
+from lazycode.context.hooks.executors import execute_action
+from lazycode.context.hooks.models import ActionResult, Hook, HookContext, ToolRejectedError
 
 log = logging.getLogger(__name__)
 

@@ -45,7 +45,7 @@ from lazycode.commands import (
 from lazycode.commands.completion import CompletionPopup
 from lazycode.commands.handlers import register_all_commands
 from lazycode.config import MCPServerConfig, ProviderConfig
-from lazycode.hooks import HookContext, HookEngine, load_hooks
+from lazycode.context.hooks import HookContext, HookEngine, load_hooks
 from lazycode.conversation import ConversationManager, Message
 from lazycode.mcp import MCPManager
 from lazycode.memory import (

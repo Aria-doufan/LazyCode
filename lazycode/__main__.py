@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from lazycode.config import ConfigError, load_config
-from lazycode.hooks import HookConfigError, HookEngine, load_hooks
+from lazycode.context.hooks import HookConfigError, HookEngine, load_hooks
 from lazycode.permissions import PermissionMode
 
 

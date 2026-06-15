@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from lazycode.hooks.conditions import ConditionParseError, parse_condition
-from lazycode.hooks.events import LifecycleEvent
-from lazycode.hooks.models import Action, Hook
+from lazycode.context.hooks.conditions import ConditionParseError, parse_condition
+from lazycode.context.hooks.events import LifecycleEvent
+from lazycode.context.hooks.models import Action, Hook
 
 _VALID_EVENTS = {e.value for e in LifecycleEvent}
 _VALID_ACTION_TYPES = {"command", "prompt", "http", "agent"}

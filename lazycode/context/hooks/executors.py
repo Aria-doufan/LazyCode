@@ -6,7 +6,7 @@ import os
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 
-from lazycode.hooks.models import Action, ActionResult, HookContext
+from lazycode.context.hooks.models import Action, ActionResult, HookContext
 
 log = logging.getLogger(__name__)
 

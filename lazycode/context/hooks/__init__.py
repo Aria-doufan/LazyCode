@@ -1,14 +1,14 @@
 
-from lazycode.hooks.conditions import (
+from lazycode.context.hooks.conditions import (
     Condition,
     ConditionGroup,
     ConditionParseError,
     parse_condition,
 )
-from lazycode.hooks.engine import HookEngine
-from lazycode.hooks.events import LifecycleEvent
-from lazycode.hooks.loader import HookConfigError, load_hooks
-from lazycode.hooks.models import (
+from lazycode.context.hooks.engine import HookEngine
+from lazycode.context.hooks.events import LifecycleEvent
+from lazycode.context.hooks.loader import HookConfigError, load_hooks
+from lazycode.context.hooks.models import (
     Action,
     ActionResult,
     Hook,

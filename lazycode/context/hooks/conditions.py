@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from lazycode.hooks.models import HookContext
+    from lazycode.context.hooks.models import HookContext
 
 
 @dataclass

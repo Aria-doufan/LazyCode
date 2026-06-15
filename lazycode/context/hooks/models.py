@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from lazycode.hooks.conditions import ConditionGroup
+from lazycode.context.hooks.conditions import ConditionGroup
 
 
 @dataclass

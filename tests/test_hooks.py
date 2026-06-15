@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lazycode.hooks import (
+from lazycode.context.hooks import (
     Action,
     ActionResult,
     Condition,
@@ -230,7 +230,7 @@ class TestConditionGroupEvaluate:
 class TestCommandExecutor:
     @pytest.mark.asyncio
     async def test_normal_execution(self):
-        from lazycode.hooks.executors import execute_command
+        from lazycode.context.hooks.executors import execute_command
 
         action = Action(type="command", command="echo hello")
         ctx = HookContext()
@@ -240,7 +240,7 @@ class TestCommandExecutor:
 
     @pytest.mark.asyncio
     async def test_variable_substitution(self):
-        from lazycode.hooks.executors import execute_command
+        from lazycode.context.hooks.executors import execute_command
 
         action = Action(type="command", command="echo $FILE_PATH")
         ctx = HookContext(file_path="src/main.py")
@@ -249,7 +249,7 @@ class TestCommandExecutor:
 
     @pytest.mark.asyncio
     async def test_timeout(self):
-        from lazycode.hooks.executors import execute_command
+        from lazycode.context.hooks.executors import execute_command
 
         command = f'"{sys.executable}" -c "import time; time.sleep(10)"'
         action = Action(type="command", command=command, timeout=1)
@@ -263,7 +263,7 @@ class TestCommandExecutor:
 
     @pytest.mark.asyncio
     async def test_cancel_kills_running_command(self, monkeypatch: pytest.MonkeyPatch):
-        from lazycode.hooks import executors
+        from lazycode.context.hooks import executors
 
         killed = False
         waited = False
@@ -306,7 +306,7 @@ class TestCommandExecutor:
 class TestPromptExecutor:
     @pytest.mark.asyncio
     async def test_returns_message(self):
-        from lazycode.hooks.executors import execute_prompt
+        from lazycode.context.hooks.executors import execute_prompt
 
         action = Action(type="prompt", message="Hello $TOOL_NAME")
         ctx = HookContext(tool_name="WriteFile")
@@ -317,12 +317,12 @@ class TestPromptExecutor:
 class TestHttpExecutor:
     @pytest.mark.asyncio
     async def test_mock_request(self):
-        from lazycode.hooks.executors import execute_http
+        from lazycode.context.hooks.executors import execute_http
 
         action = Action(type="http", url="https://httpbin.org/post", body='{"test": true}')
         ctx = HookContext()
         # 使用 mock 避免真实网络调用
-        with patch("lazycode.hooks.executors.urlopen") as mock_urlopen:
+        with patch("lazycode.context.hooks.executors.urlopen") as mock_urlopen:
             mock_resp = mock_urlopen.return_value.__enter__.return_value
             mock_resp.status = 200
             mock_resp.read.return_value = b'{"ok": true}'
@@ -333,7 +333,7 @@ class TestHttpExecutor:
 class TestAgentExecutor:
     @pytest.mark.asyncio
     async def test_stub(self):
-        from lazycode.hooks.executors import execute_agent
+        from lazycode.context.hooks.executors import execute_agent
 
         action = Action(type="agent", prompt="Check $FILE_PATH")
         ctx = HookContext(file_path="test.py")
@@ -344,7 +344,7 @@ class TestAgentExecutor:
 class TestExecuteAction:
     @pytest.mark.asyncio
     async def test_dispatch(self):
-        from lazycode.hooks.executors import execute_action
+        from lazycode.context.hooks.executors import execute_action
 
         action = Action(type="command", command="echo dispatch_test")
         ctx = HookContext()
@@ -353,7 +353,7 @@ class TestExecuteAction:
 
     @pytest.mark.asyncio
     async def test_unknown_type(self):
-        from lazycode.hooks.executors import execute_action
+        from lazycode.context.hooks.executors import execute_action
 
         action = Action(type="unknown")
         ctx = HookContext()

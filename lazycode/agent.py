@@ -34,8 +34,8 @@ from lazycode.permissions import (
     PermissionChecker,
     PermissionMode,
 )
-from lazycode.hooks import HookContext, HookEngine, ToolRejectedError
-from lazycode.hooks.engine import HookNotification
+from lazycode.context.hooks import HookContext, HookEngine, ToolRejectedError
+from lazycode.context.hooks.engine import HookNotification
 from lazycode.prompts import build_environment_context, build_plan_mode_reminder, build_system_prompt
 from lazycode.tools import ToolRegistry
 from lazycode.tools.base import (
